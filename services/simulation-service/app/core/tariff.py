@@ -72,15 +72,22 @@ def calculate_electricity_cost(
 ) -> pd.DataFrame:
     """
     Calculate monthly electricity cost from 15-min interval load data (kW).
-
-    Returns DataFrame indexed by Month with columns:
-      energy_cost, demand_cost, demand_penalty, res_tou_excess,
-      total_cost, peak_demand_kw, total_kwh, peak_kwh, semi_kwh, offpeak_kwh
     """
     if tariff_rates is None:
-        tariff_rates = HV_TOU
+        if voltage == "low":
+            from .tariff_config import LV_COM_TOU
+            tariff_rates = LV_COM_TOU
+        else:
+            from .tariff_config import HV_TOU
+            tariff_rates = HV_TOU
+
     if demand_charge is None:
-        demand_charge = HV_DEMAND_CHARGE_PER_KW
+        if voltage == "low":
+            from .tariff_config import LV_COM_DEMAND_CHARGE_PER_KW
+            demand_charge = LV_COM_DEMAND_CHARGE_PER_KW
+        else:
+            from .tariff_config import HV_DEMAND_CHARGE_PER_KW
+            demand_charge = HV_DEMAND_CHARGE_PER_KW
 
     df = pd.DataFrame({"load_kw": load_kw})
     month_arr = df.index.month
@@ -90,10 +97,53 @@ def calculate_electricity_cost(
                             "summer", "non_summer")
     df["tou"] = _tou_periods(df.index, voltage)
 
+    period = df.index.to_period("M")
+
+    if bill_type == "progressive":
+        from .tariff_config import RES_TIERS
+        monthly = df.groupby(period).agg(
+            total_kwh      = ("load_kw", lambda x: x.sum() * 0.25),
+            peak_demand_kw = ("load_kw", "max"),
+            summer_ratio   = ("season",  lambda x: (x == "summer").mean()),
+            peak_kwh       = ("load_kw", lambda x: 0),
+            semi_kwh       = ("load_kw", lambda x: 0),
+            offpeak_kwh    = ("load_kw", lambda x: x.sum() * 0.25),
+        )
+        
+        def calc_prog(kwh, season_tiers):
+            cost = 0.0
+            rem = kwh
+            prev_max = 0
+            for tier in season_tiers:
+                max_kwh = tier["max_kwh"]
+                rate = tier["rate"]
+                tier_size = float('inf') if max_kwh is None else (max_kwh - prev_max)
+                if rem > tier_size:
+                    cost += tier_size * rate
+                    rem -= tier_size
+                    prev_max = max_kwh
+                else:
+                    cost += rem * rate
+                    break
+            return cost
+
+        def apply_prog(row):
+            kwh = row["total_kwh"]
+            sr = row["summer_ratio"]
+            cost_s = calc_prog(kwh, RES_TIERS["summer"])
+            cost_ns = calc_prog(kwh, RES_TIERS["non_summer"])
+            return cost_s * sr + cost_ns * (1 - sr)
+
+        monthly["energy_cost"] = monthly.apply(apply_prog, axis=1)
+        monthly["demand_cost"] = 0.0
+        monthly["demand_penalty"] = 0.0
+        monthly["res_tou_excess"] = 0.0
+        monthly["total_cost"] = monthly["energy_cost"]
+        return monthly
+
+    # TOU logic
     rate = df.apply(lambda r: tariff_rates[r["season"]][r["tou"]], axis=1)
     df["energy_cost"] = df["load_kw"] * 0.25 * rate
-
-    period = df.index.to_period("M")
 
     monthly = df.groupby(period).agg(
         energy_cost    = ("energy_cost", "sum"),
@@ -127,3 +177,4 @@ def calculate_electricity_cost(
     )
 
     return monthly
+

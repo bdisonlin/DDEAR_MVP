@@ -1,0 +1,44 @@
+{
+  "seasons": {
+    "high": {"summer_start": "05-16", "summer_end": "10-15"},
+    "low":  {"summer_start": "06-01", "summer_end": "09-30"}
+  },
+  "tou": {
+    "high": {
+      "summer": {"peak": 9.39, "semi_peak": 4.15, "off_peak": 2.53},
+      "non_summer": {"peak": 0.0, "semi_peak": 3.06, "off_peak": 1.88}
+    },
+    "low": {
+      "summer": {"peak": 6.07, "semi_peak": 3.29, "off_peak": 1.56},
+      "non_summer": {"peak": 0.0, "semi_peak": 2.49, "off_peak": 1.56}
+    }
+  },
+  "progressive": {
+    "summer": [
+      {"max_kwh": 120, "rate": 1.78},
+      {"max_kwh": 330, "rate": 2.89},
+      {"max_kwh": 500, "rate": 4.15},
+      {"max_kwh": 700, "rate": 5.03},
+      {"max_kwh": 1000, "rate": 6.41},
+      {"max_kwh": null, "rate": 8.86}
+    ],
+    "non_summer": [
+      {"max_kwh": 120, "rate": 1.78},
+      {"max_kwh": 330, "rate": 2.89},
+      {"max_kwh": 500, "rate": 4.15},
+      {"max_kwh": 700, "rate": 5.03},
+      {"max_kwh": 1000, "rate": 6.41},
+      {"max_kwh": null, "rate": 7.69}
+    ]
+  },
+  "penalties": {
+    "demand_over_10pct": 3.0,
+    "demand_within_10pct": 2.0,
+    "res_tou_excess_threshold": 2000.0,
+    "res_tou_excess_rate": 1.04
+  },
+  "demand_charges": {
+    "high": 290.6,
+    "low": 180.0
+  }
+}

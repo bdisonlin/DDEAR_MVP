@@ -104,8 +104,10 @@ def simulate(req: SimulateRequest):
         baseline_load_kwh=sim["baseline_load_kwh"],
         net_load_kwh=sim["net_load_kwh"],
         demand_penalty_annual_ntd=sim["demand_penalty_annual"],
+        demand_penalty_warning=sim.get("demand_penalty_warning", False),
         res_tou_excess_annual_ntd=sim["res_tou_excess_annual"],
         storage_price_spread_ntd_per_kwh=sim["storage_price_spread"],
+        storage_arbitrage_revenue_annual_ntd=sim.get("storage_arbitrage_revenue", 0.0),
     )
 
     bm = sim["baseline_monthly"]

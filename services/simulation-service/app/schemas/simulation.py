@@ -110,8 +110,10 @@ class KpiResult(BaseModel):
     net_load_kwh: float
     # Penalty & arbitrage KPIs
     demand_penalty_annual_ntd: float = 0.0
+    demand_penalty_warning: bool = False
     res_tou_excess_annual_ntd: float = 0.0
     storage_price_spread_ntd_per_kwh: float = 0.0
+    storage_arbitrage_revenue_annual_ntd: float = 0.0
 
 
 class RoiResult(BaseModel):

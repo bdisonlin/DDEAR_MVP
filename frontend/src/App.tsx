@@ -5,6 +5,7 @@ import Welcome from '@/pages/Welcome'
 import Dashboard from '@/pages/Dashboard'
 import { useSandboxStore } from '@/store/useSandboxStore'
 import { getAssetTypes } from '@/api/simulation'
+import Settings from '@/pages/Settings'
 
 export default function App() {
   const setAssetTypes = useSandboxStore((s) => s.setAssetTypes)
@@ -19,6 +20,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={baseline ? <Dashboard /> : <Welcome />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/settings" element={<Settings />} />
       </Routes>
     </Layout>
   )

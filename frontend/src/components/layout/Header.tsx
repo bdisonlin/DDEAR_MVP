@@ -1,6 +1,7 @@
 import { useSandboxStore } from '@/store/useSandboxStore'
 import { useThemeContext } from '@/context/ThemeContext'
 import { fmtNtd } from '@/utils/formatters'
+import { Link } from 'react-router-dom'
 
 interface HeaderProps {
   onMenuClick?: () => void
@@ -80,6 +81,11 @@ export default function Header({ onMenuClick }: HeaderProps) {
         >
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
+
+        {/* Settings link */}
+        <Link to="/settings" title="系統設定" className="w-8 h-8 flex items-center justify-center rounded-full transition-all duration-200 bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 text-gray-600 dark:text-gray-300 cursor-pointer">
+          ⚙️
+        </Link>
       </div>
     </header>
   )

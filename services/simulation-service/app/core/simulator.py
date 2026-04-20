@@ -20,6 +20,7 @@ def _apply_storage(load_kw, index, capacity_kwh, power_kw, efficiency=0.92):
     dt  = 0.25
     hour    = index.hour
     weekday = index.weekday
+    total_discharge_kwh = 0.0
     for i in range(len(net)):
         h = hour[i]
         if 0 <= h < 7:
@@ -32,8 +33,9 @@ def _apply_storage(load_kw, index, capacity_kwh, power_kw, efficiency=0.92):
             discharge = max(0, discharge)
             net[i] -= discharge
             soc -= discharge / efficiency
+            total_discharge_kwh += discharge
         net[i] = max(0, net[i])
-    return net
+    return net, total_discharge_kwh
 
 
 def simulate_scenario(
@@ -55,6 +57,7 @@ def simulate_scenario(
     total_annual_om  = 0.0
     export_kwh       = 0.0
     has_storage      = False
+    storage_shifted_kwh = 0.0
 
     for asset in assets:
         atype   = asset["type"]
@@ -78,15 +81,14 @@ def simulate_scenario(
         elif atype == "storage":
             has_storage = True
             params = asset.get("params", {})
-            net_load = pd.Series(
-                _apply_storage(
-                    net_load.values, baseline_load.index,
-                    capacity_kwh=params.get("capacity_kwh", 500),
-                    power_kw=params.get("power_kw", 250),
-                    efficiency=params.get("efficiency", 0.92),
-                ),
-                index=baseline_load.index,
+            net_vals, shifted_kwh = _apply_storage(
+                net_load.values, baseline_load.index,
+                capacity_kwh=params.get("capacity_kwh", 500),
+                power_kw=params.get("power_kw", 250),
+                efficiency=params.get("efficiency", 0.92),
             )
+            net_load = pd.Series(net_vals, index=baseline_load.index)
+            storage_shifted_kwh += shifted_kwh
         elif atype == "ev":
             net_load = net_load + profile
 
@@ -121,10 +123,15 @@ def simulate_scenario(
 
     # Storage price-spread arbitrage potential
     storage_price_spread = 0.0
+    storage_arbitrage_revenue = 0.0
     if has_storage:
         sp  = tariff_rates.get("summer", {}).get("peak",     0.0)
         sop = tariff_rates.get("summer", {}).get("off_peak", 0.0)
         storage_price_spread = max(sp - sop, 0.0)
+        storage_arbitrage_revenue = storage_shifted_kwh * storage_price_spread
+
+    demand_penalty_annual = float(scenario_monthly["demand_penalty"].sum())
+    demand_penalty_warning = demand_penalty_annual > 0
 
     return {
         "baseline_monthly":   baseline_monthly,
@@ -147,6 +154,8 @@ def simulate_scenario(
         "net_load_kwh":       net_load_kwh,
         "monthly_re_ratio":   monthly_re_ratio,
         "storage_price_spread": storage_price_spread,
-        "demand_penalty_annual": float(scenario_monthly["demand_penalty"].sum()),
+        "storage_arbitrage_revenue": storage_arbitrage_revenue,
+        "demand_penalty_annual": demand_penalty_annual,
+        "demand_penalty_warning": demand_penalty_warning,
         "res_tou_excess_annual": float(scenario_monthly["res_tou_excess"].sum()),
     }

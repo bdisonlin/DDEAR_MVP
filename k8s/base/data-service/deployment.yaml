@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-service
+  template:
+    metadata:
+      labels:
+        app: data-service
+    spec:
+      containers:
+        - name: data-service
+          image: ddear/data-service:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATA_DIR
+              value: /data/uploads
+            - name: ALLOWED_ORIGINS
+              value: "*"
+          volumeMounts:
+            - name: data-vol
+              mountPath: /data
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+      volumes:
+        - name: data-vol
+          persistentVolumeClaim:
+            claimName: data-service-pvc

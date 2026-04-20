@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ddear
+
+resources:
+  - namespace.yaml
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - simulation-service/deployment.yaml
+  - simulation-service/service.yaml
+  - data-service/deployment.yaml
+  - data-service/service.yaml
+  - data-service/pvc.yaml
+  - ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: ddear
+  app.kubernetes.io/managed-by: kustomize

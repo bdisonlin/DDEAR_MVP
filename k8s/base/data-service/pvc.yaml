@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-service-pvc
+spec:
+  accessModes:
+    - ReadWriteMany       # NFS or cloud shared storage; change to ReadWriteOnce for single-node
+  storageClassName: ""    # Override in overlay (on-premise: nfs-client | aws: efs-sc | gcp: filestore-sc)
+  resources:
+    requests:
+      storage: 50Gi

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod *)",
+      "Read(//usr/local/go/**)",
+      "Read(//opt/homebrew/bin/**)"
+    ]
+  }
+}

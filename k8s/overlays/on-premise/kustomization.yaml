@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+# ── On-Premise overrides ──────────────────────────────────────────────────────
+# Use MetalLB LoadBalancer (or change to NodePort if MetalLB is unavailable).
+# Storage: NFS provisioner (nfs-subdir-external-provisioner).
+# TLS: cert-manager with self-signed CA or internal PKI.
+
+patches:
+  - path: patches/ingress-patch.yaml
+  - path: patches/pvc-patch.yaml
+
+images:
+  - name: ddear/frontend
+    newTag: "1.0.0"
+  - name: ddear/simulation-service
+    newTag: "1.0.0"
+  - name: ddear/data-service
+    newTag: "1.0.0"

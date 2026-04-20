@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+bases:
+  - ../../base
+
+# ── AWS EKS overrides ─────────────────────────────────────────────────────────
+# Ingress: AWS Load Balancer Controller (ALB)
+# Storage: Amazon EFS (ReadWriteMany) via efs-csi-driver
+# Registry: ECR — update image names below
+
+patches:
+  - path: patches/ingress-patch.yaml
+  - path: patches/pvc-patch.yaml
+
+images:
+  - name: ddear/frontend
+    newName: 123456789.dkr.ecr.ap-northeast-1.amazonaws.com/ddear/frontend
+    newTag: "1.0.0"
+  - name: ddear/simulation-service
+    newName: 123456789.dkr.ecr.ap-northeast-1.amazonaws.com/ddear/simulation-service
+    newTag: "1.0.0"
+  - name: ddear/data-service
+    newName: 123456789.dkr.ecr.ap-northeast-1.amazonaws.com/ddear/data-service
+    newTag: "1.0.0"

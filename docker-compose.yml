@@ -1,0 +1,77 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DDEAR — Local Development Environment
+# Mirrors the K8s service topology. Each service talks to the others by name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Python FastAPI — Simulation Engine ──────────────────────────────────────
+  simulation-service:
+    build:
+      context: ./services/simulation-service
+      dockerfile: Dockerfile
+    image: ddear/simulation-service:dev
+    container_name: ddear-simulation
+    ports:
+      - "8000:8000"
+    environment:
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:80
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ddear-net
+
+  # ── Go — Data / File Service ─────────────────────────────────────────────────
+  data-service:
+    build:
+      context: ./services/data-service
+      dockerfile: Dockerfile
+    image: ddear/data-service:dev
+    container_name: ddear-data
+    ports:
+      - "8080:8080"
+    environment:
+      - DATA_DIR=/data/uploads
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:80
+    volumes:
+      - data-uploads:/data/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ddear-net
+
+  # ── React Frontend (nginx) ────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ddear/frontend:dev
+    container_name: ddear-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      simulation-service:
+        condition: service_healthy
+      data-service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ddear-net
+
+volumes:
+  data-uploads:
+    driver: local
+
+networks:
+  ddear-net:
+    driver: bridge

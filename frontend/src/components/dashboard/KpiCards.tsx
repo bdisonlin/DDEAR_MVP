@@ -27,24 +27,40 @@ function KpiCard({ title, value, sub, accent, bg, border, icon, positive }: Card
       className="kpi-card"
       style={{ background: bg, borderColor: border }}
     >
-      <div className="relative z-10 flex items-start justify-between mb-2">
-        <span className="text-xs uppercase tracking-widest font-semibold" style={{ color: accent }}>
+      {/* Header row */}
+      <div className="relative z-10 flex items-center justify-between mb-2.5">
+        <span className="font-bold uppercase" style={{ fontSize: 10, letterSpacing: '0.09em', color: accent }}>
           {title}
         </span>
         {icon && (
-          <span className="text-lg w-8 h-8 flex items-center justify-center rounded-ios-sm"
-            style={{ background: bg, border: `1px solid ${border}` }}>
+          <span
+            className="w-8 h-8 flex items-center justify-center rounded-[9px] text-base shrink-0"
+            style={{
+              background: `${accent}18`,
+              border: `1px solid ${accent}28`,
+              boxShadow: `0 1px 4px ${accent}18`,
+            }}
+          >
             {icon}
           </span>
         )}
       </div>
 
+      {/* Value */}
       <div className="relative z-10">
-        <p className="text-2xl font-bold font-data tracking-tight text-gray-900 dark:text-white">
+        <p
+          className="font-bold font-data tracking-tight leading-none text-gray-900 dark:text-white"
+          style={{ fontSize: 26 }}
+        >
           {value}
         </p>
         {sub && (
-          <p className="text-xs mt-1 font-data font-medium" style={{ color: subColor }}>{sub}</p>
+          <p
+            className="mt-1.5 font-data font-semibold"
+            style={{ fontSize: 11.5, color: subColor }}
+          >
+            {sub}
+          </p>
         )}
       </div>
     </div>
@@ -57,15 +73,15 @@ export default function KpiCards({ kpis, roi }: Props) {
   const hasSpread  = kpis.storage_price_spread_ntd_per_kwh > 0
 
   return (
-    <div className="space-y-3 animate-fade-up">
+    <div className="space-y-2.5 animate-fade-up">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard
           title="年度節省"
           value={fmtNtd(kpis.annual_savings)}
           sub={`↓ ${fmtPct(kpis.savings_pct)}`}
           accent="#34C759"
-          bg="rgba(52,199,89,0.08)"
-          border="rgba(52,199,89,0.18)"
+          bg="rgba(52,199,89,0.07)"
+          border="rgba(52,199,89,0.16)"
           icon="💰"
           positive={kpis.annual_savings > 0}
         />
@@ -74,8 +90,8 @@ export default function KpiCards({ kpis, roi }: Props) {
           value={fmtPct(kpis.re_ratio)}
           sub={`RE ${fmtKwh(kpis.re_kwh)}`}
           accent="#007AFF"
-          bg="rgba(0,122,255,0.07)"
-          border="rgba(0,122,255,0.15)"
+          bg="rgba(0,122,255,0.06)"
+          border="rgba(0,122,255,0.14)"
           icon="♻️"
           positive={kpis.re_ratio > 0}
         />
@@ -84,8 +100,8 @@ export default function KpiCards({ kpis, roi }: Props) {
           value={`${kpis.carbon_reduction_tons.toFixed(1)} t`}
           sub={`CO₂e ↓ ${fmtPct(kpis.carbon_reduction_pct)}`}
           accent="#AF52DE"
-          bg="rgba(175,82,222,0.08)"
-          border="rgba(175,82,222,0.18)"
+          bg="rgba(175,82,222,0.07)"
+          border="rgba(175,82,222,0.16)"
           icon="🌿"
           positive={kpis.carbon_reduction_tons > 0}
         />
@@ -94,8 +110,8 @@ export default function KpiCards({ kpis, roi }: Props) {
           value={fmtNtd(kpis.total_capex)}
           sub={`O&M ${fmtNtd(kpis.total_annual_om)} / yr`}
           accent="#FF9500"
-          bg="rgba(255,149,0,0.08)"
-          border="rgba(255,149,0,0.18)"
+          bg="rgba(255,149,0,0.07)"
+          border="rgba(255,149,0,0.16)"
           icon="🏗️"
         />
         <KpiCard
@@ -103,31 +119,52 @@ export default function KpiCards({ kpis, roi }: Props) {
           value={roi.payback_years != null ? `${roi.payback_years.toFixed(1)} 年` : '—'}
           sub={`NPV ${fmtNtd(roi.npv)}`}
           accent="#5856D6"
-          bg="rgba(88,86,214,0.08)"
-          border="rgba(88,86,214,0.18)"
+          bg="rgba(88,86,214,0.07)"
+          border="rgba(88,86,214,0.16)"
           icon="📈"
           positive={roi.npv > 0}
         />
       </div>
 
-      {/* Penalty / arbitrage alerts */}
+      {/* Alert badges */}
       {(hasPenalty || hasExcess || hasSpread) && (
         <div className="flex flex-wrap gap-2">
           {hasPenalty && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-ios-sm text-xs font-medium
-              bg-red-500/10 border border-red-500/20 text-red-500">
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-ios-sm font-medium"
+              style={{
+                fontSize: 12,
+                background: 'rgba(255,59,48,0.08)',
+                border: '1px solid rgba(255,59,48,0.18)',
+                color: '#FF3B30',
+              }}
+            >
               ⚠ 超約罰款 {fmtNtd(kpis.demand_penalty_annual_ntd)} / 年
             </div>
           )}
           {hasExcess && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-ios-sm text-xs font-medium
-              bg-orange-500/10 border border-orange-500/20 text-orange-400">
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-ios-sm font-medium"
+              style={{
+                fontSize: 12,
+                background: 'rgba(255,149,0,0.08)',
+                border: '1px solid rgba(255,149,0,0.18)',
+                color: '#FF9500',
+              }}
+            >
               ⚠ 住商超量加收 {fmtNtd(kpis.res_tou_excess_annual_ntd)} / 年
             </div>
           )}
           {hasSpread && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-ios-sm text-xs font-medium
-              bg-ios-blue/10 border border-ios-blue/20 text-ios-blue">
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-ios-sm font-medium"
+              style={{
+                fontSize: 12,
+                background: 'rgba(0,122,255,0.08)',
+                border: '1px solid rgba(0,122,255,0.18)',
+                color: '#007AFF',
+              }}
+            >
               ⚡ 儲能尖離峰價差 {kpis.storage_price_spread_ntd_per_kwh.toFixed(2)} 元/度
             </div>
           )}

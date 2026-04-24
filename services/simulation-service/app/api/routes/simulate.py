@@ -11,8 +11,10 @@ from app.core.roi import calculate_roi
 from app.assets.asset_models import (
     solar_profile, wind_profile, hydro_profile,
     hvac_savings_profile, ev_charging_profile,
+    sofc_profile, natgas_profile,
 )
 from app import store
+from app.db import sim_store
 
 router = APIRouter()
 
@@ -31,16 +33,31 @@ def _build_profile(atype, params, index, baseline):
     elif atype == "wind":
         return wind_profile(index, cap, params.capacity_factor or 0.30)
     elif atype == "hydro":
-        return hydro_profile(index, cap)
+        return hydro_profile(index, cap, params.capacity_factor or 0.40)
     elif atype == "hvac":
         return hvac_savings_profile(index, baseline, params.efficiency_gain or 0.15)
     elif atype == "ev":
         return ev_charging_profile(index, params.num_chargers or 5, params.charger_kw or 22.0, params.smart_charging)
+    elif atype == "sofc":
+        return sofc_profile(index, cap, params.capacity_factor or 0.85)
+    elif atype == "natgas":
+        return natgas_profile(index, cap, params.capacity_factor or 0.65)
     return pd.Series(0.0, index=index)
 
 
 def _representative_week(year):
     return f"{year}-07-07", f"{year}-07-13 23:45"
+
+
+def _week_range(year: int, month: int, week: int) -> tuple[str, str]:
+    """Return a 7-day window for the given week (1–4) of a month.
+    Week 1: days 1–7, Week 2: days 8–14, Week 3: days 15–21, Week 4: days 22–28.
+    """
+    starts = {1: 1, 2: 8, 3: 15, 4: 22}
+    ends   = {1: 7, 2: 14, 3: 21, 4: 28}
+    d0 = starts[week]
+    d1 = ends[week]
+    return f"{year}-{month:02d}-{d0:02d}", f"{year}-{month:02d}-{d1:02d} 23:45"
 
 
 @router.post("", response_model=SimulationResponse)
@@ -82,7 +99,8 @@ def simulate(req: SimulateRequest):
         bill_type=bill_type,
     )
     roi = calculate_roi(
-        sim["annual_savings"], sim["total_capex"], sim["total_annual_om"],
+        sim["annual_savings"], sim["total_capex"],
+        sim["total_annual_om"] + sim["annual_fuel_cost_ntd"],
         req.financial_config.project_years, req.financial_config.discount_rate,
     )
 
@@ -108,6 +126,7 @@ def simulate(req: SimulateRequest):
         res_tou_excess_annual_ntd=sim["res_tou_excess_annual"],
         storage_price_spread_ntd_per_kwh=sim["storage_price_spread"],
         storage_arbitrage_revenue_annual_ntd=sim.get("storage_arbitrage_revenue", 0.0),
+        annual_fuel_cost_ntd=sim["annual_fuel_cost_ntd"],
     )
 
     bm = sim["baseline_monthly"]
@@ -176,8 +195,60 @@ def simulate(req: SimulateRequest):
                                        baseline_kw=round(b_avg, 1),
                                        scenario_kw=round(s_avg, 1)))
 
-    return SimulationResponse(
+    # Per-month-week data for the UI switcher; key = "{month}_{week}" e.g. "7_2"
+    load_chart_by_month: dict[str, list[LoadChartPoint]] = {}
+    for m in range(1, 13):
+        for w in range(1, 5):
+            w_start, w_end = _week_range(year, m, w)
+            try:
+                wb = baseline[w_start:w_end]
+                ws = sim["net_load"][w_start:w_end]
+                wr = sim["re_generation"][w_start:w_end]
+                if len(wb) >= 96:
+                    load_chart_by_month[f"{m}_{w}"] = [
+                        LoadChartPoint(
+                            ts=str(ts),
+                            baseline_kw=round(float(bv), 2),
+                            scenario_kw=round(float(sv), 2),
+                            re_gen_kw=round(float(rv), 2),
+                        )
+                        for ts, bv, sv, rv in zip(wb.index, wb.values, ws.values, wr.values)
+                    ]
+            except Exception:
+                pass
+
+    response = SimulationResponse(
         kpis=kpis, monthly=monthly, roi=roi_result,
         load_chart=load_chart, load_heatmap=heatmap,
+        load_chart_by_month=load_chart_by_month,
         asset_ids=[a.id for a in req.assets],
     )
+
+    # Persist run (non-blocking best-effort — never fails the request)
+    sim_store.save_run(
+        baseline_id=req.data_id,
+        assets=[a.model_dump() for a in req.assets],
+        tariff=req.tariff_config.model_dump(),
+        financial=req.financial_config.model_dump(),
+        result=response.model_dump(),
+        annual_savings=sim["annual_savings"],
+        re_ratio=sim["re_ratio"],
+        total_capex=sim["total_capex"],
+    )
+
+    return response
+
+
+@router.get("/history/{data_id}")
+def simulation_history(data_id: str, limit: int = 20):
+    """List recent simulation runs for a baseline (lightweight — no result blob)."""
+    return {"runs": sim_store.list_runs(data_id, limit=min(limit, 100))}
+
+
+@router.get("/history/{data_id}/{run_id}")
+def simulation_run_detail(data_id: str, run_id: str):
+    """Fetch the full SimulationResponse for a past run."""
+    result = sim_store.get_run_result(run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return result

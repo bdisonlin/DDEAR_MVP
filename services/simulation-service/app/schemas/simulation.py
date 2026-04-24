@@ -35,7 +35,7 @@ class AssetParams(BaseModel):
     annual_om_ntd: float = Field(default=0, ge=0)
     # solar
     # wind
-    capacity_factor: Optional[float] = Field(default=None, ge=0.1, le=0.6)
+    capacity_factor: Optional[float] = Field(default=None, ge=0.05, le=1.0)
     # hvac
     efficiency_gain: Optional[float] = Field(default=None, ge=0.01, le=0.5)
     # storage
@@ -46,6 +46,13 @@ class AssetParams(BaseModel):
     num_chargers: Optional[int] = Field(default=None, ge=1)
     charger_kw: Optional[float] = Field(default=None, ge=3)
     smart_charging: Optional[bool] = True
+    # sofc / natgas
+    electrical_efficiency: Optional[float] = Field(default=None, ge=0.25, le=0.75)
+    gas_price_ntd_per_kwh_fuel: Optional[float] = Field(default=None, ge=0.1, le=10.0)
+    # PPA / green power transfer contract (solar_purchase, wind, hydro)
+    transfer_ratio: float = Field(default=1.0, ge=0.01, le=1.0)     # P_mi 轉供比例
+    monthly_cap_kwh: Optional[float] = Field(default=None, ge=0)    # M_ni 月度上限
+    annual_cap_kwh: Optional[float] = Field(default=None, ge=0)     # Y_ni 年度上限
 
 
 class AssetRequest(BaseModel):
@@ -114,6 +121,8 @@ class KpiResult(BaseModel):
     res_tou_excess_annual_ntd: float = 0.0
     storage_price_spread_ntd_per_kwh: float = 0.0
     storage_arbitrage_revenue_annual_ntd: float = 0.0
+    # Dispatchable generation (SOFC / NG)
+    annual_fuel_cost_ntd: float = 0.0
 
 
 class RoiResult(BaseModel):
@@ -143,8 +152,9 @@ class SimulationResponse(BaseModel):
     kpis: KpiResult
     monthly: list[MonthlyRow]
     roi: RoiResult
-    load_chart: list[LoadChartPoint]  # representative week (672 pts)
-    load_heatmap: list[HeatmapCell]   # 12 × 24 = 288 cells
+    load_chart: list[LoadChartPoint]              # representative week (672 pts)
+    load_heatmap: list[HeatmapCell]               # 12 × 24 = 288 cells
+    load_chart_by_month: dict[str, list[LoadChartPoint]] = {}  # key = "1"–"12"
     asset_ids: list[str]
 
 

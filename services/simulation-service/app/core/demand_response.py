@@ -120,6 +120,11 @@ def simulate_dr(series: pd.Series, req: DRRequest) -> DRSettlement:
         max_feasible = cbl_kw * 0.65
         actual_reduction_kw = min(req.contracted_kw, max_feasible)
 
+        # 競價型最低有效抑低門檻：台電規定競價型不得低於 20 kW，不足則按 0 計算
+        if req.program in (DRProgram.BID_ECONOMIC, DRProgram.BID_RELIABLE):
+            if actual_reduction_kw < 20.0:
+                actual_reduction_kw = 0.0
+
         exec_rate = actual_reduction_kw / req.contracted_kw if req.contracted_kw > 0 else 0.0
         disc = _discount_rate(exec_rate, req.notification_type)
 

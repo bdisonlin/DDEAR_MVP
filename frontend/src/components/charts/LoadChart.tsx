@@ -31,9 +31,9 @@ export default function LoadChart({ data }: Props) {
         <Line type="monotone" dataKey="baseline_kw" name="基準負載"
           stroke="#007AFF" dot={false} strokeWidth={2} />
         <Line type="monotone" dataKey="scenario_kw" name="模擬後淨負載"
-          stroke="#34C759" dot={false} strokeWidth={2} strokeDasharray="6 3" />
-        <Line type="monotone" dataKey="re_gen_kw" name="RE 發電量"
-          stroke="#FF9500" dot={false} strokeWidth={1.5} />
+          stroke="#FF9500" dot={false} strokeWidth={2} strokeDasharray="6 3" />
+        <Line type="monotone" dataKey="re_gen_kw" name="綠能發電量"
+          stroke="#34C759" dot={false} strokeWidth={1.5} />
       </LineChart>
     </ResponsiveContainer>
   )

@@ -14,6 +14,8 @@ export const simApi = {
   get:  <T>(path: string)             => request<T>(`${BASE_SIM}${path}`),
   post: <T>(path: string, body: unknown) =>
     request<T>(`${BASE_SIM}${path}`, { method: 'POST', body: JSON.stringify(body) }),
+  put: <T>(path: string, body: unknown) =>
+    request<T>(`${BASE_SIM}${path}`, { method: 'PUT', body: JSON.stringify(body) }),
 }
 
 export const dataApi = {

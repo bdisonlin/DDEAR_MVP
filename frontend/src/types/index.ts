@@ -40,6 +40,12 @@ export interface AssetParams {
   num_chargers?: number
   charger_kw?: number
   smart_charging?: boolean
+  electrical_efficiency?: number
+  gas_price_ntd_per_kwh_fuel?: number
+  // PPA contract parameters
+  transfer_ratio?: number        // P_mi 轉供比例 0–1
+  monthly_cap_kwh?: number       // M_ni 月度上限
+  annual_cap_kwh?: number        // Y_ni 年度上限
 }
 
 export interface Asset {
@@ -80,6 +86,7 @@ export interface KpiResult {
   demand_penalty_annual_ntd: number
   res_tou_excess_annual_ntd: number
   storage_price_spread_ntd_per_kwh: number
+  annual_fuel_cost_ntd: number
 }
 
 export interface MonthlyRow {
@@ -127,6 +134,7 @@ export interface SimulationResponse {
   roi: RoiResult
   load_chart: LoadChartPoint[]
   load_heatmap: HeatmapCell[]
+  load_chart_by_month: Record<string, LoadChartPoint[]>
   asset_ids: string[]
 }
 

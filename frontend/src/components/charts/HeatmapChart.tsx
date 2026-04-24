@@ -33,12 +33,42 @@ function kwToColor(value: number, min: number, max: number): string {
   return `rgb(${r},${g},${b})`
 }
 
+// ── TOU pricing classification (台電高壓時間電價) ──────────────────────────
+type TouZone = 'peak' | 'semi' | 'offpeak'
+
+const TOU_META: Record<TouZone, { label: string; labelEn: string; color: string; rgb: string }> = {
+  peak:    { label: '尖峰',   labelEn: 'Peak',     color: '#FF3B30', rgb: '255,59,48'  },
+  semi:    { label: '半尖峰', labelEn: 'Semi-peak', color: '#FF9500', rgb: '255,149,0'  },
+  offpeak: { label: '離峰',   labelEn: 'Off-peak',  color: '#007AFF', rgb: '0,122,255'  },
+}
+
+function getTouZone(month: number, hour: number): TouZone {
+  // Off-peak: 22:30–07:30 → approximate as hour < 8 or hour >= 23
+  if (hour < 8 || hour >= 23) return 'offpeak'
+  const isSummer = month >= 6 && month <= 9
+  if (isSummer) {
+    // Peak: 10:00–12:00, 13:00–17:00 (weekdays only, but averaged across all days)
+    if ((hour >= 10 && hour < 12) || (hour >= 13 && hour < 17)) return 'peak'
+  }
+  // Semi-peak: remaining daytime (7:30–22:30) — includes non-summer full daytime
+  return 'semi'
+}
+
+function touColor(zone: TouZone, value: number, min: number, max: number): string {
+  // Opacity 0.18 (min load) → 0.90 (max load) so zone color stays visible at all levels
+  const t = max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0.5
+  const alpha = (0.18 + 0.72 * t).toFixed(2)
+  return `rgba(${TOU_META[zone].rgb},${alpha})`
+}
+
 interface TooltipState {
   month: number; hour: number; value: number; x: number; y: number
 }
 
+type ViewMode = 'baseline' | 'scenario' | 'tou'
+
 export default function HeatmapChart({ data }: Props) {
-  const [mode, setMode] = useState<'baseline' | 'scenario'>('baseline')
+  const [mode, setMode] = useState<ViewMode>('baseline')
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
 
   const grid = useMemo(() => {
@@ -47,7 +77,8 @@ export default function HeatmapChart({ data }: Props) {
     return map
   }, [data])
 
-  const values = data.map(c => mode === 'baseline' ? c.baseline_kw : c.scenario_kw)
+  const kw = (c: HeatmapCell) => mode === 'scenario' ? c.scenario_kw : c.baseline_kw
+  const values = data.map(c => kw(c))
   const minVal = Math.min(...values)
   const maxVal = Math.max(...values)
 
@@ -59,25 +90,38 @@ export default function HeatmapChart({ data }: Props) {
     label: `${(minVal + t * (maxVal - minVal)).toFixed(0)} kW`,
   }))
 
+  const VIEW_TABS: { key: ViewMode; label: string }[] = [
+    { key: 'baseline', label: '基準負載' },
+    { key: 'scenario', label: '模擬後負載' },
+    { key: 'tou',      label: '時段電費分布' },
+  ]
+
   return (
     <div className="space-y-4">
       {/* Mode toggle */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <div className="flex gap-1 p-1 rounded-ios-sm" style={{ background: 'rgba(0,0,0,0.05)' }}>
-          {(['baseline', 'scenario'] as const).map(m => (
-            <button key={m} onClick={() => setMode(m)}
+          {VIEW_TABS.map(t => (
+            <button key={t.key} onClick={() => setMode(t.key)}
               className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-all duration-200 ${
-                mode === m
+                mode === t.key
                   ? 'bg-white text-ios-blue shadow-ios'
                   : 'text-ios-gray1 hover:text-gray-700'
               }`}>
-              {m === 'baseline' ? '基準負載' : '模擬後負載'}
+              {t.label}
             </button>
           ))}
         </div>
-        <span className="text-xs text-ios-gray2 font-data ml-auto">
-          {minVal.toFixed(0)} – {maxVal.toFixed(0)} kW
-        </span>
+        {mode !== 'tou' && (
+          <span className="text-xs text-ios-gray2 font-data ml-auto">
+            {minVal.toFixed(0)} – {maxVal.toFixed(0)} kW
+          </span>
+        )}
+        {mode === 'tou' && (
+          <span className="text-xs text-ios-gray2 ml-auto">
+            顏色＝時段別　深淺＝負載強度（均含平假日平均）
+          </span>
+        )}
       </div>
 
       {/* Heatmap grid */}
@@ -105,8 +149,11 @@ export default function HeatmapChart({ data }: Props) {
                 <div className="flex flex-1 rounded-sm overflow-hidden">
                   {HOURS.map(hour => {
                     const cell = grid[`${month}-${hour}`]
-                    const val = cell ? (mode === 'baseline' ? cell.baseline_kw : cell.scenario_kw) : 0
-                    const color = kwToColor(val, minVal, maxVal)
+                    const val = cell ? kw(cell) : 0
+                    const zone = getTouZone(month, hour)
+                    const color = mode === 'tou'
+                      ? touColor(zone, val, minVal, maxVal)
+                      : kwToColor(val, minVal, maxVal)
                     return (
                       <div
                         key={hour}
@@ -138,28 +185,55 @@ export default function HeatmapChart({ data }: Props) {
       </div>
 
       {/* Color legend */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-ios-gray2 font-data">低</span>
-        <div className="flex-1 h-2 rounded-full overflow-hidden" style={{
-          background: `linear-gradient(to right, ${legendStops.map(s => s.color).join(', ')})`,
-        }} />
-        <span className="text-xs text-ios-gray2 font-data">高</span>
-        <div className="flex gap-3 ml-3">
-          {legendStops.filter((_, i) => i % 2 === 0).map((s, i) => (
-            <div key={i} className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-sm border border-black/10" style={{ background: s.color }} />
-              <span className="text-xs text-ios-gray2 font-data">{s.label}</span>
+      {mode !== 'tou' ? (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-ios-gray2 font-data">低</span>
+          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{
+            background: `linear-gradient(to right, ${legendStops.map(s => s.color).join(', ')})`,
+          }} />
+          <span className="text-xs text-ios-gray2 font-data">高</span>
+          <div className="flex gap-3 ml-3">
+            {legendStops.filter((_, i) => i % 2 === 0).map((s, i) => (
+              <div key={i} className="flex items-center gap-1">
+                <div className="w-2 h-2 rounded-sm border border-black/10" style={{ background: s.color }} />
+                <span className="text-xs text-ios-gray2 font-data">{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-4 items-start">
+          {(Object.keys(TOU_META) as TouZone[]).map(zone => (
+            <div key={zone} className="flex items-center gap-2 rounded-ios-sm px-3 py-1.5"
+              style={{ background: `rgba(${TOU_META[zone].rgb},0.10)`, border: `1px solid rgba(${TOU_META[zone].rgb},0.20)` }}>
+              <div className="w-3 h-3 rounded-sm" style={{ background: `rgba(${TOU_META[zone].rgb},0.65)` }} />
+              <div>
+                <span className="text-xs font-semibold" style={{ color: TOU_META[zone].color }}>
+                  {TOU_META[zone].label}
+                </span>
+                <span className="text-xs text-ios-gray2 ml-1.5 font-data">
+                  {zone === 'peak'
+                    ? '夏月（6–9月）平日 10–12h、13–17h'
+                    : zone === 'semi'
+                    ? '平日 08–22h（非尖峰以外）＋週六 08–22h'
+                    : '23h–07h、週日及國定假日全日'}
+                </span>
+              </div>
             </div>
           ))}
+          <p className="text-xs text-ios-gray2 w-full mt-0.5">
+            ※ 深淺代表平均負載強度。熱圖數值為月份×小時全天平均（含平日／週六／週日混合），
+            週六半尖峰已列於說明但無法在格子層級單獨顯示；實際電費計算以台電帳單為準。
+          </p>
         </div>
-      </div>
+      )}
 
       {/* Floating tooltip */}
       {tooltip && (
         <div
           className="fixed z-50 pointer-events-none rounded-ios-sm border border-black/8 px-3 py-2 text-xs"
           style={{
-            top: tooltip.y - 70,
+            top: tooltip.y - 80,
             left: tooltip.x - 20,
             background: 'rgba(255,255,255,0.95)',
             backdropFilter: 'blur(20px)',
@@ -169,6 +243,14 @@ export default function HeatmapChart({ data }: Props) {
             {MONTHS[tooltip.month - 1]} · {String(tooltip.hour).padStart(2,'0')}:00
           </div>
           <div className="text-gray-600 font-data">{tooltip.value.toFixed(1)} kW 平均</div>
+          {mode === 'tou' && (() => {
+            const zone = getTouZone(tooltip.month, tooltip.hour)
+            return (
+              <div className="mt-1 font-semibold" style={{ color: TOU_META[zone].color }}>
+                {TOU_META[zone].label}（{TOU_META[zone].labelEn}）
+              </div>
+            )
+          })()}
         </div>
       )}
     </div>

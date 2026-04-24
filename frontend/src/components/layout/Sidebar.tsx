@@ -11,17 +11,20 @@ import clsx from 'clsx'
 type InputMode = 'sample' | 'csv' | 'bill'
 
 const ASSET_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  solar_self:     { bg: 'rgba(255,149,0,0.10)',  text: '#FF9500', border: 'rgba(255,149,0,0.20)'  },
-  solar_purchase: { bg: 'rgba(255,149,0,0.10)',  text: '#FF9500', border: 'rgba(255,149,0,0.20)'  },
-  wind:           { bg: 'rgba(90,200,250,0.12)', text: '#5AC8FA', border: 'rgba(90,200,250,0.25)' },
-  hydro:          { bg: 'rgba(0,122,255,0.10)',  text: '#007AFF', border: 'rgba(0,122,255,0.20)'  },
-  hvac:           { bg: 'rgba(175,82,222,0.10)', text: '#AF52DE', border: 'rgba(175,82,222,0.20)' },
-  storage:        { bg: 'rgba(52,199,89,0.10)',  text: '#34C759', border: 'rgba(52,199,89,0.20)'  },
-  ev:             { bg: 'rgba(88,86,214,0.10)',  text: '#5856D6', border: 'rgba(88,86,214,0.20)'  },
+  solar_self:     { bg: 'rgba(255,149,0,0.09)',  text: '#FF9500', border: 'rgba(255,149,0,0.18)'  },
+  solar_purchase: { bg: 'rgba(255,149,0,0.09)',  text: '#FF9500', border: 'rgba(255,149,0,0.18)'  },
+  wind:           { bg: 'rgba(90,200,250,0.10)', text: '#5AC8FA', border: 'rgba(90,200,250,0.22)' },
+  hydro:          { bg: 'rgba(0,122,255,0.09)',  text: '#007AFF', border: 'rgba(0,122,255,0.18)'  },
+  hvac:           { bg: 'rgba(175,82,222,0.09)', text: '#AF52DE', border: 'rgba(175,82,222,0.18)' },
+  storage:        { bg: 'rgba(52,199,89,0.09)',  text: '#34C759', border: 'rgba(52,199,89,0.18)'  },
+  ev:             { bg: 'rgba(88,86,214,0.09)',  text: '#5856D6', border: 'rgba(88,86,214,0.18)'  },
+  sofc:           { bg: 'rgba(231,111,81,0.09)', text: '#e76f51', border: 'rgba(231,111,81,0.18)' },
+  natgas:         { bg: 'rgba(109,104,117,0.09)',text: '#6d6875', border: 'rgba(109,104,117,0.18)'},
 }
 const ASSET_ICONS: Record<string, string> = {
   solar_self: '☀️', solar_purchase: '☀️', wind: '💨',
   hydro: '💧', hvac: '❄️', storage: '🔋', ev: '⚡',
+  sofc: '🔥', natgas: '⚙️',
 }
 
 const DR_PROGRAMS: { value: DRProgram; label: string }[] = [
@@ -43,12 +46,26 @@ interface SidebarProps {
   onClose?: () => void
 }
 
+/* ── Section header ── */
+function SectionHeader({ icon, title, action }: { icon: string; title: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between px-4 pt-4 pb-2">
+      <div className="flex items-center gap-2">
+        <span style={{ fontSize: 13 }}>{icon}</span>
+        <span className="font-bold text-gray-600 dark:text-gray-400" style={{ fontSize: 10.5, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+          {title}
+        </span>
+      </div>
+      {action}
+    </div>
+  )
+}
+
 export default function Sidebar({ onClose }: SidebarProps) {
   const navigate  = useNavigate()
   const {
     baseline, setBaseline,
     assets, addAsset, removeAsset, clearAssets,
-    tariff, financial,
     setSimResult, setIsSimulating, setSimError, isSimulating,
     setInsights, setIsLoadingInsights,
     drConfig, setDrConfig,
@@ -88,15 +105,16 @@ export default function Sidebar({ onClose }: SidebarProps) {
   }
 
   const handleSimulate = useCallback(async () => {
-    if (!baseline) return
+    const { baseline: bl, assets: as_, tariff: tr, financial: fi } = useSandboxStore.getState()
+    if (!bl) return
     setIsSimulating(true)
     setSimError(null)
     setInsights([])
     try {
-      const result = await runSimulation(baseline.data_id, assets, tariff, financial)
+      const result = await runSimulation(bl.data_id, as_, tr, fi)
       setSimResult(result)
       setIsLoadingInsights(true)
-      fetchInsights(result, assets.map(a => a.type))
+      fetchInsights(result, as_.map(a => a.type))
         .then(setInsights).catch(() => setInsights([]))
         .finally(() => setIsLoadingInsights(false))
     } catch (e: unknown) {
@@ -108,7 +126,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
         setSimError(msg)
       }
     } finally { setIsSimulating(false) }
-  }, [baseline, assets, tariff, financial, setSimResult, setIsSimulating, setSimError, setInsights, setIsLoadingInsights, setBaseline])
+  }, [setSimResult, setIsSimulating, setSimError, setInsights, setIsLoadingInsights, setBaseline])
 
   const handleAddAsset = (asset: Asset) => {
     addAsset(asset)
@@ -146,204 +164,240 @@ export default function Sidebar({ onClose }: SidebarProps) {
   const isBiddingProgram = drConfig.program.startsWith('bid_')
 
   return (
-    <aside className="w-full shrink-0 flex flex-col overflow-y-auto border-r border-black/8 glass-sidebar">
+    <aside className="w-full shrink-0 flex flex-col overflow-y-auto border-r border-black/[0.07] dark:border-white/[0.07] glass-sidebar">
 
-      {/* ── Baseline ──────────────────────────────────────────── */}
-      <div className="p-4 border-b border-black/6">
-        <p className="label mb-3">基本資料</p>
+      {/* ── Baseline ── */}
+      <div className="border-b border-black/[0.06] dark:border-white/[0.06]">
+        <SectionHeader icon="📊" title="用電基本資料" />
 
-        {!baseline ? (
-          <div className="space-y-3">
-            {/* Mode tabs */}
-            <div className="flex gap-0.5 p-0.5 rounded-ios-sm bg-black/5 dark:bg-white/6">
-              {([
-                { id: 'sample', label: '示範' },
-                { id: 'csv',    label: 'CSV' },
-                { id: 'bill',   label: '電費單' },
-              ] as { id: InputMode; label: string }[]).map(tab => (
-                <button key={tab.id} onClick={() => setInputMode(tab.id)}
-                  className={clsx(
-                    'flex-1 text-xs py-1.5 rounded-lg font-medium transition-all duration-200',
-                    inputMode === tab.id
-                      ? 'bg-white dark:bg-white/15 text-ios-blue shadow-ios'
-                      : 'text-ios-gray1 hover:text-gray-700 dark:hover:text-gray-300'
-                  )}>
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* ── Sample mode ── */}
-            {inputMode === 'sample' && (
-              <div className="space-y-3 animate-scale-in">
-                <div>
-                  <label className="label">尖峰需量 (kW)</label>
-                  <input className="input" type="number" value={peakKw}
-                    onChange={(e) => setPeakKw(+e.target.value)} min={100} max={50000} step={100} />
-                </div>
-                <div>
-                  <label className="label">年份</label>
-                  <select className="input" value={year} onChange={(e) => setYear(+e.target.value)}>
-                    {[2022, 2023, 2024, 2025].map(y => <option key={y}>{y}</option>)}
-                  </select>
-                </div>
-                <button className="btn-primary w-full" onClick={handleSample} disabled={loadingBaseline}>
-                  {loadingBaseline
-                    ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />載入中</>
-                    : '載入示範資料'}
-                </button>
-                <p className="text-xs text-ios-gray2 text-center">合成 1000 kW 工廠典型負載</p>
-              </div>
-            )}
-
-            {/* ── CSV upload mode ── */}
-            {inputMode === 'csv' && (
-              <div className="space-y-3 animate-scale-in">
-                <label className={clsx(
-                  'btn-secondary w-full cursor-pointer',
-                  loadingBaseline && 'opacity-40 pointer-events-none'
-                )}>
-                  {loadingBaseline
-                    ? <><div className="w-3.5 h-3.5 border-2 border-ios-blue/40 border-t-ios-blue rounded-full animate-spin-slow" />上傳中</>
-                    : '選擇 CSV 檔案'}
-                  <input type="file" accept=".csv" className="hidden" onChange={handleUpload} />
-                </label>
-                <div className="rounded-ios-sm p-3 text-xs text-ios-gray1 space-y-1 bg-black/3 dark:bg-white/4 border border-black/6 dark:border-white/6">
-                  <p className="font-semibold text-ios-gray1">格式說明</p>
-                  <p className="font-data">timestamp, load_kw</p>
-                  <p className="font-data">2024-01-01 00:00, 850.2</p>
-                  <p className="font-data">2024-01-01 00:15, 842.7</p>
-                  <p className="text-ios-gray2 mt-1">15 分鐘間隔，至少 1 天</p>
-                </div>
-              </div>
-            )}
-
-            {/* ── Monthly bill mode ── */}
-            {inputMode === 'bill' && (
-              <div className="animate-scale-in">
-                <MonthlyBillForm onSuccess={handleBillSuccess} />
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {[
-              ['尖峰需量', `${baseline.peak_kw.toFixed(0)} kW`],
-              ['年用電量', `${(baseline.total_kwh / 1e6).toFixed(2)} GWh`],
-              ['期間',     `${baseline.date_start} ~ ${baseline.date_end.slice(5)}`],
-            ].map(([k, v]) => (
-              <div key={k} className="flex justify-between text-sm">
-                <span className="text-ios-gray1">{k}</span>
-                <span className="font-medium text-gray-800 dark:text-gray-200 font-data text-xs">{v}</span>
-              </div>
-            ))}
-            <button className="btn-danger w-full mt-2 text-xs" onClick={() => { setBaseline(null); setReHint(null) }}>
-              重置資料
-            </button>
-            {reHint && (
-              <div className="mt-2 rounded-ios-sm p-2.5 text-xs space-y-1 animate-scale-in"
-                style={{ background: 'rgba(52,199,89,0.08)', border: '1px solid rgba(52,199,89,0.20)' }}>
-                <p className="font-semibold text-ios-green">✦ 偵測到綠電轉供</p>
-                <p className="text-ios-gray1">
-                  {(reHint.kwh / 1000).toFixed(0)} MWh／年，
-                  建議加入「外購太陽能」資產（約 {reHint.cap.toFixed(0)} kW）
-                </p>
-                <button
-                  className="text-ios-green font-semibold hover:opacity-70 transition-opacity"
-                  onClick={() => setReHint(null)}>
-                  知道了 ×
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── Assets ──────────────────────────────────────────────── */}
-      {baseline && (
-        <div className="p-4 flex flex-col gap-3 border-b border-black/6">
-          <div className="flex items-center justify-between">
-            <p className="label">沙盒資產</p>
-            <button onClick={() => setShowAssetForm(true)}
-              className="text-xs font-semibold text-ios-blue hover:opacity-70 transition-opacity">
-              + 新增
-            </button>
-          </div>
-
-          {showAssetForm && (
-            <div className="animate-scale-in">
-              <AssetForm onAdd={handleAddAsset} onCancel={() => setShowAssetForm(false)} />
-            </div>
-          )}
-
-          {assets.length === 0 && !showAssetForm && (
-            <p className="text-xs text-ios-gray2 text-center py-4 leading-relaxed">
-              點擊「+ 新增」<br />加入能源資產開始模擬
-            </p>
-          )}
-
-          <div className="space-y-2">
-            {assets.map((a) => {
-              const c = ASSET_COLORS[a.type] ?? { bg: 'rgba(0,122,255,0.08)', text: '#007AFF', border: 'rgba(0,122,255,0.15)' }
-              return (
-                <div key={a.id}
-                  className="group flex items-center justify-between rounded-ios-sm px-3 py-2.5 animate-slide-in"
-                  style={{ background: c.bg, border: `1px solid ${c.border}` }}>
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className="text-base shrink-0">{ASSET_ICONS[a.type] ?? '🏭'}</span>
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold truncate" style={{ color: c.text }}>{a.label}</div>
-                      <div className="text-xs text-ios-gray1 truncate">{a.name}</div>
-                    </div>
-                  </div>
+        <div className="px-4 pb-4">
+          {!baseline ? (
+            <div className="space-y-3">
+              {/* Mode tabs */}
+              <div className="flex gap-0.5 p-0.5 rounded-[9px] bg-black/[0.05] dark:bg-white/[0.06]">
+                {([
+                  { id: 'sample', label: '示範資料' },
+                  { id: 'csv',    label: 'CSV' },
+                  { id: 'bill',   label: '電費單' },
+                ] as { id: InputMode; label: string }[]).map(tab => (
                   <button
-                    className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-ios-gray2 hover:bg-red-100 hover:text-ios-red transition-all ml-2"
-                    onClick={() => { removeAsset(a.id); setTimeout(handleSimulate, 100) }}>
-                    ×
+                    key={tab.id}
+                    onClick={() => setInputMode(tab.id)}
+                    className={clsx(
+                      'flex-1 py-1.5 rounded-[7px] font-medium transition-all duration-200',
+                      inputMode === tab.id
+                        ? 'bg-white dark:bg-white/[0.15] text-ios-blue shadow-ios'
+                        : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
+                    )}
+                    style={{ fontSize: 12 }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Sample mode */}
+              {inputMode === 'sample' && (
+                <div className="space-y-3 animate-scale-in">
+                  <div>
+                    <label className="label">尖峰需量 (kW)</label>
+                    <input className="input" type="number" value={peakKw}
+                      onChange={(e) => setPeakKw(+e.target.value)} min={100} max={50000} step={100} />
+                  </div>
+                  <div>
+                    <label className="label">年份</label>
+                    <select className="input" value={year} onChange={(e) => setYear(+e.target.value)}>
+                      {[2022, 2023, 2024, 2025].map(y => <option key={y}>{y}</option>)}
+                    </select>
+                  </div>
+                  <button className="btn-primary w-full" onClick={handleSample} disabled={loadingBaseline}>
+                    {loadingBaseline
+                      ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />載入中</>
+                      : '載入示範資料'}
+                  </button>
+                  <p className="text-center text-gray-400 dark:text-gray-500" style={{ fontSize: 11.5 }}>
+                    合成 1000 kW 工廠典型負載
+                  </p>
+                </div>
+              )}
+
+              {/* CSV upload mode */}
+              {inputMode === 'csv' && (
+                <div className="space-y-3 animate-scale-in">
+                  <label className={clsx('btn-secondary w-full cursor-pointer', loadingBaseline && 'opacity-40 pointer-events-none')}>
+                    {loadingBaseline
+                      ? <><div className="w-3.5 h-3.5 border-2 border-ios-blue/40 border-t-ios-blue rounded-full animate-spin-slow" />上傳中</>
+                      : '選擇 CSV 檔案'}
+                    <input type="file" accept=".csv" className="hidden" onChange={handleUpload} />
+                  </label>
+                  <div
+                    className="rounded-[9px] p-3 space-y-1"
+                    style={{
+                      background: 'rgba(0,0,0,0.03)',
+                      border: '1px solid rgba(0,0,0,0.06)',
+                    }}
+                  >
+                    <p className="font-bold text-gray-500 dark:text-gray-400" style={{ fontSize: 11 }}>格式說明</p>
+                    <p className="font-data text-gray-400" style={{ fontSize: 11 }}>timestamp, load_kw</p>
+                    <p className="font-data text-gray-400" style={{ fontSize: 11 }}>2024-01-01 00:00, 850.2</p>
+                    <p className="font-data text-gray-400" style={{ fontSize: 11 }}>2024-01-01 00:15, 842.7</p>
+                    <p className="text-gray-400 mt-1" style={{ fontSize: 11 }}>15 分鐘間隔，至少 1 天</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Monthly bill mode */}
+              {inputMode === 'bill' && (
+                <div className="animate-scale-in">
+                  <MonthlyBillForm onSuccess={handleBillSuccess} />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {[
+                ['尖峰需量', `${baseline.peak_kw.toFixed(0)} kW`],
+                ['年用電量', `${(baseline.total_kwh / 1e6).toFixed(2)} GWh`],
+                ['期間',     `${baseline.date_start} ~ ${baseline.date_end.slice(5)}`],
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between items-center py-1">
+                  <span className="text-gray-400 dark:text-gray-500" style={{ fontSize: 12.5 }}>{k}</span>
+                  <span className="font-data font-semibold text-gray-700 dark:text-gray-300" style={{ fontSize: 12 }}>{v}</span>
+                </div>
+              ))}
+              <button className="btn-danger w-full mt-1 text-xs" onClick={() => { setBaseline(null); setReHint(null) }}>
+                重置資料
+              </button>
+              {reHint && (
+                <div
+                  className="mt-2 rounded-[9px] p-3 space-y-1.5 animate-scale-in"
+                  style={{ background: 'rgba(52,199,89,0.07)', border: '1px solid rgba(52,199,89,0.18)' }}
+                >
+                  <p className="font-bold text-ios-green" style={{ fontSize: 12 }}>✦ 偵測到綠電轉供</p>
+                  <p className="text-gray-500 dark:text-gray-400 leading-relaxed" style={{ fontSize: 11.5 }}>
+                    {(reHint.kwh / 1000).toFixed(0)} MWh／年，
+                    建議加入「外購太陽能」資產（約 {reHint.cap.toFixed(0)} kW）
+                  </p>
+                  <button
+                    className="text-ios-green font-bold hover:opacity-70 transition-opacity"
+                    style={{ fontSize: 12 }}
+                    onClick={() => setReHint(null)}>
+                    知道了 ×
                   </button>
                 </div>
-              )
-            })}
-          </div>
-
-          {assets.length > 0 && (
-            <div className="space-y-2">
-              <button className="btn-primary w-full" onClick={handleSimulate} disabled={isSimulating}>
-                {isSimulating
-                  ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />模擬中</>
-                  : '▶ 執行模擬'}
-              </button>
-              <button className="btn-ghost w-full text-xs text-ios-gray1"
-                onClick={() => { clearAssets(); setInsights([]) }}>
-                清空所有資產
-              </button>
+              )}
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Assets ── */}
+      {baseline && (
+        <div className="border-b border-black/[0.06] dark:border-white/[0.06]">
+          <SectionHeader
+            icon="🏭"
+            title="沙盒資產"
+            action={
+              <button
+                onClick={() => setShowAssetForm(true)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full font-semibold transition-all hover:opacity-80"
+                style={{
+                  fontSize: 11.5,
+                  background: 'rgba(0,122,255,0.09)',
+                  color: '#007AFF',
+                  border: '1px solid rgba(0,122,255,0.18)',
+                }}
+              >
+                + 新增
+              </button>
+            }
+          />
+
+          <div className="px-4 pb-4 flex flex-col gap-2">
+            {showAssetForm && (
+              <div className="animate-scale-in">
+                <AssetForm onAdd={handleAddAsset} onCancel={() => setShowAssetForm(false)} />
+              </div>
+            )}
+
+            {assets.length === 0 && !showAssetForm && (
+              <div className="py-6 text-center">
+                <p className="text-gray-300 dark:text-gray-600 mb-1" style={{ fontSize: 28 }}>🏭</p>
+                <p className="text-gray-400 dark:text-gray-500 leading-relaxed" style={{ fontSize: 12 }}>
+                  點擊「+ 新增」加入能源資產<br/>開始數位孿生模擬
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              {assets.map((a) => {
+                const c = ASSET_COLORS[a.type] ?? { bg: 'rgba(0,122,255,0.07)', text: '#007AFF', border: 'rgba(0,122,255,0.14)' }
+                return (
+                  <div
+                    key={a.id}
+                    className="group flex items-center justify-between rounded-[9px] px-3 py-2 animate-slide-in"
+                    style={{ background: c.bg, border: `1px solid ${c.border}` }}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span style={{ fontSize: 15 }} className="shrink-0">{ASSET_ICONS[a.type] ?? '🏭'}</span>
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate" style={{ fontSize: 12.5, color: c.text }}>{a.label}</div>
+                        <div className="text-gray-400 dark:text-gray-500 truncate" style={{ fontSize: 11 }}>{a.name}</div>
+                      </div>
+                    </div>
+                    <button
+                      className="shrink-0 w-5 h-5 flex items-center justify-center rounded-full text-gray-300 dark:text-gray-600 hover:bg-red-100 dark:hover:bg-red-500/15 hover:text-ios-red transition-all ml-2"
+                      style={{ fontSize: 14 }}
+                      onClick={() => { removeAsset(a.id); setTimeout(handleSimulate, 100) }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+
+            {assets.length > 0 && (
+              <div className="space-y-2 mt-1">
+                <button className="btn-primary w-full" onClick={handleSimulate} disabled={isSimulating}>
+                  {isSimulating
+                    ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />模擬中</>
+                    : '▶ 執行模擬'}
+                </button>
+                <button
+                  className="btn-ghost w-full text-gray-400 dark:text-gray-500"
+                  style={{ fontSize: 12 }}
+                  onClick={() => { clearAssets(); setInsights([]) }}
+                >
+                  清空所有資產
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
-      {/* ── Demand Response ─────────────────────────────────────── */}
+      {/* ── Demand Response ── */}
       {baseline && (
-        <div className="p-4 flex flex-col gap-3">
+        <div>
           <button
             onClick={() => setShowDrPanel(!showDrPanel)}
-            className="flex items-center justify-between w-full group">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg flex items-center justify-center text-xs"
-                style={{ background: 'rgba(88,86,214,0.12)', color: '#5856D6' }}>
-                ⚡
-              </div>
-              <p className="label mb-0">需量反應試算</p>
-            </div>
-            <span className="text-ios-gray2 text-sm transition-transform duration-200"
-              style={{ transform: showDrPanel ? 'rotate(90deg)' : 'none' }}>
+            className="w-full flex items-center justify-between group"
+          >
+            <SectionHeader
+              icon="🔌"
+              title="需量反應試算"
+            />
+            <span
+              className="mr-4 text-gray-400 transition-transform duration-200"
+              style={{ transform: showDrPanel ? 'rotate(90deg)' : 'none', fontSize: 16 }}
+            >
               ›
             </span>
           </button>
 
           {showDrPanel && (
-            <div className="space-y-3 animate-scale-in">
-              {/* Program */}
+            <div className="px-4 pb-4 space-y-3 animate-scale-in">
               <div>
                 <label className="label">方案類型</label>
                 <select className="input" value={drConfig.program}
@@ -352,7 +406,6 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 </select>
               </div>
 
-              {/* Contracted capacity */}
               <div>
                 <label className="label">約定抑低容量 (kW)</label>
                 <input className="input" type="number" value={drConfig.contracted_kw}
@@ -360,12 +413,11 @@ export default function Sidebar({ onClose }: SidebarProps) {
                   min={20} step={50} />
               </div>
 
-              {/* Bid price — only for bidding programs */}
               {isBiddingProgram && (
                 <div>
                   <label className="label">
-                    報價 (元/度) —{' '}
-                    <span className="text-ios-indigo font-data normal-case">
+                    報價 (元/度)
+                    <span className="text-ios-indigo font-data ml-1 normal-case" style={{ letterSpacing: 0 }}>
                       NT${drConfig.bid_price_ntd_per_kwh.toFixed(1)}
                     </span>
                   </label>
@@ -373,13 +425,12 @@ export default function Sidebar({ onClose }: SidebarProps) {
                     value={drConfig.bid_price_ntd_per_kwh}
                     onChange={(e) => setDrConfig({ ...drConfig, bid_price_ntd_per_kwh: +e.target.value })}
                     className="w-full accent-ios-indigo" />
-                  <div className="flex justify-between text-xs text-ios-gray2 font-data mt-0.5">
+                  <div className="flex justify-between font-data text-gray-400 mt-0.5" style={{ fontSize: 11 }}>
                     <span>0</span><span>5</span><span>10 元/度</span>
                   </div>
                 </div>
               )}
 
-              {/* Bid price fixed for non-bidding */}
               {!isBiddingProgram && (
                 <div>
                   <label className="label">台電固定費率 (元/度)</label>
@@ -389,7 +440,6 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 </div>
               )}
 
-              {/* Duration */}
               <div>
                 <label className="label">每次執行時數 (hr)</label>
                 <select className="input" value={drConfig.event_duration_hours}
@@ -398,7 +448,6 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 </select>
               </div>
 
-              {/* Notification type */}
               <div>
                 <label className="label">通知類型</label>
                 <select className="input" value={drConfig.notification_type}
@@ -407,8 +456,12 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 </select>
               </div>
 
-              <button className="btn-primary w-full" onClick={handleDrSimulate} disabled={isDrSimulating}
-                style={{ background: '#5856D6', boxShadow: '0 2px 8px rgba(88,86,214,0.30)' }}>
+              <button
+                className="btn-primary w-full"
+                onClick={handleDrSimulate}
+                disabled={isDrSimulating}
+                style={{ background: 'linear-gradient(145deg, #6e6cd8, #5856D6)', boxShadow: '0 2px 10px rgba(88,86,214,0.32)' }}
+              >
                 {isDrSimulating
                   ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />分析中</>
                   : '▶ 試算需量反應收益'}

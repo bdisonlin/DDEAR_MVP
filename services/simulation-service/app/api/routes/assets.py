@@ -11,7 +11,9 @@ _CATALOGUE = [
     AssetTypeInfo(type="hydro",          label="💧 外購水力發電",    unit="kW",  color="#4d908e", capex_hint_ntd_per_unit=90000, default_capacity=300),
     AssetTypeInfo(type="hvac",           label="❄️ 空調效率提升",   unit="kW效益", color="#577590", capex_hint_ntd_per_unit=3000000, default_capacity=0),
     AssetTypeInfo(type="storage",        label="🔋 儲能系統",       unit="kWh", color="#90be6d", capex_hint_ntd_per_unit=15000, default_capacity=1000),
-    AssetTypeInfo(type="ev",             label="⚡ 充電樁",          unit="kW",  color="#277da1", capex_hint_ntd_per_unit=80000, default_capacity=0),
+    AssetTypeInfo(type="ev",             label="⚡ 充電樁",          unit="kW",  color="#277da1", capex_hint_ntd_per_unit=80000,  default_capacity=0),
+    AssetTypeInfo(type="sofc",           label="🔥 固態氧化物燃料電池 (SOFC)", unit="kW", color="#e76f51", capex_hint_ntd_per_unit=100000, default_capacity=500),
+    AssetTypeInfo(type="natgas",         label="⚙️ 天然氣發電機",   unit="kW",  color="#6d6875", capex_hint_ntd_per_unit=35000,  default_capacity=500),
 ]
 
 

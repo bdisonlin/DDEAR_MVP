@@ -4,10 +4,8 @@ uvicorn[standard]>=0.29.0
 pandas>=2.0.0
 numpy>=1.24.0
 python-multipart>=0.0.9
-httpx>=0.27.0
 pydantic>=2.6.0
-scipy>=1.11.0
-# Database
+# Database (optional — service runs in-memory when DATABASE_URL/REDIS_URL not set)
 psycopg2-binary>=2.9.9
 sqlalchemy>=2.0.0
 redis>=5.0.0

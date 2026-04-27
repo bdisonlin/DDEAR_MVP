@@ -63,24 +63,6 @@ CREATE TABLE IF NOT EXISTS baselines (
     series_gz       BYTEA        NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS simulation_runs (
-    id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    baseline_id     VARCHAR(12)  REFERENCES baselines(id) ON DELETE CASCADE,
-    created_at      TIMESTAMPTZ  DEFAULT NOW(),
-    request_hash    VARCHAR(64)  NOT NULL,
-    assets_json     JSONB        NOT NULL,
-    tariff_json     JSONB        NOT NULL,
-    financial_json  JSONB        NOT NULL,
-    result_json     JSONB        NOT NULL,
-    annual_savings  FLOAT,
-    re_ratio        FLOAT,
-    total_capex     FLOAT
-);
-
-CREATE INDEX IF NOT EXISTS idx_sim_runs_hash       ON simulation_runs(request_hash);
-CREATE INDEX IF NOT EXISTS idx_sim_runs_baseline   ON simulation_runs(baseline_id);
-CREATE INDEX IF NOT EXISTS idx_sim_runs_created_at ON simulation_runs(created_at DESC);
-
 CREATE TABLE IF NOT EXISTS tariff_presets (
     id          SERIAL       PRIMARY KEY,
     name        VARCHAR(100) NOT NULL UNIQUE,

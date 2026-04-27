@@ -187,34 +187,106 @@ interface DRScore {
   dr: DRPeriodConfig; score: number; valueLabel: string; params: EnergyParams
 }
 
+// Taiwan Power DR events are dispatched for ≤ 2 hours per call.
+// All dispatchable assets (natgas, SOFC, BESS) must be sized to cover
+// at most 2 hours of load — they cannot supply more than that per event.
+const DR_DISPATCH_H = 2
+
+// ── CSV Upload Parser ─────────────────────────────────────────
+// Accepts a one-week (or longer) 15-min interval CSV and derives a
+// 24-hour hourly average load profile for use in the AI engine.
+// Supported formats: "timestamp,load_kw" (comma or tab separated)
+type ParseOk  = { ok: true;  scenario: Scenario; days: number; peakKw: number }
+type ParseErr = { ok: false; error: string }
+function parseWeeklyCsv(text: string): ParseOk | ParseErr {
+  const lines = text.trim().split(/\r?\n/)
+  if (lines.length < 2) return { ok: false, error: 'CSV 是空的' }
+
+  const sep = lines[0].includes('\t') ? '\t' : ','
+  const buckets: number[][] = Array.from({ length: 24 }, () => [])
+  let rawPeak = 0
+  let valid   = 0
+  const dates = new Set<string>()
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols  = lines[i].split(sep)
+    if (cols.length < 2) continue
+    const tsStr = cols[0].trim().replace(/["']/g, '')
+    const kw    = parseFloat(cols[1].trim().replace(/["']/g, ''))
+    if (!tsStr || isNaN(kw) || kw < 0) continue
+    const ts = new Date(tsStr)
+    if (isNaN(ts.getTime())) continue
+    buckets[ts.getHours()].push(kw)
+    rawPeak = Math.max(rawPeak, kw)
+    valid++
+    dates.add(tsStr.slice(0, 10))
+  }
+
+  if (valid < 96)
+    return { ok: false, error: `有效資料僅 ${valid} 筆，至少需要 1 天（96 筆 × 15 分鐘）` }
+
+  const loadProfile = buckets.map(b =>
+    b.length > 0 ? Math.round(b.reduce((s, v) => s + v, 0) / b.length) : 0
+  )
+  const peakKw = Math.round(rawPeak)
+  const days   = dates.size
+
+  return {
+    ok: true,
+    peakKw,
+    days,
+    scenario: {
+      id:            'custom_upload',
+      label:         '我的用電資料',
+      icon:          '📈',
+      desc:          `上傳 ${days} 天樣本 · 峰值 ~${peakKw} kW · 純前端 AI 最佳化`,
+      loadProfile,
+      peakKw,
+      existingGenKw: 0,
+      genParalleled: false,
+    },
+  }
+}
+
 function getDynamicPresets(drStart: number, drEnd: number, scenario: Scenario) {
-  const dur        = drEnd - drStart
   const isDaytime  = drStart >= 10 && drStart <= 16
   const isMorning  = drStart < 10
 
-  // ── Use actual scenario demand during the DR window as the sizing basis.
-  //    This ensures new assets never exceed what the load actually requires.
-  const drSlice   = scenario.loadProfile.slice(drStart, Math.min(drEnd, 24))
-  const avgDrLoad = drSlice.length > 0
-    ? drSlice.reduce((s, v) => s + v, 0) / drSlice.length
-    : scenario.peakKw * 0.6
+  const drSlice = scenario.loadProfile.slice(drStart, Math.min(drEnd, 24))
 
-  // Existing paralleled gen + existing solar already cover part of DR demand
-  const genOffset  = scenario.existingGenKw * (scenario.genParalleled ? 0.9 : 0)
+  // Use the PEAK DR_DISPATCH_H-hour block within the window as the sizing basis.
+  // DR events are called during the most demanding period — assets must handle that,
+  // not the full-window average which understates the worst case.
+  const avgDrLoad = (() => {
+    if (drSlice.length === 0) return scenario.peakKw * 0.6
+    if (drSlice.length < DR_DISPATCH_H) return drSlice.reduce((s, v) => s + v, 0) / drSlice.length
+    let peak = 0
+    for (let i = 0; i <= drSlice.length - DR_DISPATCH_H; i++) {
+      const windowAvg = drSlice.slice(i, i + DR_DISPATCH_H).reduce((s, v) => s + v, 0) / DR_DISPATCH_H
+      if (windowAvg > peak) peak = windowAvg
+    }
+    return peak
+  })()
+
+  // Existing paralleled gen + existing solar cover part of DR demand (at 2h dispatch peak)
+  const genOffset = scenario.existingGenKw * (scenario.genParalleled ? 0.9 : 0)
+  // Solar avg computed over the full DR window (not peak 2h, since solar varies continuously)
   const existingSolarDrAvg = drSlice.reduce((s, _, i) => {
     const h  = drStart + i
     const sf = h >= 6 && h <= 18 ? Math.sin(Math.PI * (h - 6) / 12) * 0.88 : 0
     return s + (scenario.existingSolarKw ?? 0) * sf
   }, 0) / Math.max(1, drSlice.length)
-  // Net new capacity the AI needs to recommend (bounded to actual demand)
-  const netNeeded  = Math.max(0, avgDrLoad - genOffset - existingSolarDrAvg)
+  // Net new capacity needed at peak DR load — bounded by actual scenario demand
+  const netNeeded = Math.max(0, avgDrLoad - genOffset - existingSolarDrAvg)
 
-  // Solar effectiveness of NEW assets during the DR window
+  // Solar effectiveness of NEW assets during DR window
   const solarAvail = drSlice.reduce((s, _, i) => {
     const h = drStart + i
     return s + (h >= 6 && h <= 18 ? Math.sin(Math.PI * (h - 6) / 12) * 0.85 : 0)
   }, 0) / Math.max(1, drSlice.length)
 
+  // BESS sizing rule: DR_DISPATCH_H × power_share = kWh needed for 2-hour dispatch.
+  // natgas / SOFC: power (kW) sized to serve netNeeded during the 2-hour window.
   return {
     costMin: {
       selfSolar: 0,
@@ -223,7 +295,8 @@ function getDynamicPresets(drStart: number, drEnd: number, scenario: Scenario) {
       hydroPPA:  0,
       natgas:    Math.round(netNeeded * (isDaytime ? 0.70 : 0.85)),
       sofc:      0,
-      bess:      Math.round(Math.min(500, avgDrLoad * 0.12)),
+      // 2h × 15% of netNeeded → BESS stores enough for 2h of that power share
+      bess:      Math.round(Math.min(600, DR_DISPATCH_H * netNeeded * 0.15)),
     } as EnergyParams,
     esg: {
       selfSolar: 0,
@@ -234,7 +307,8 @@ function getDynamicPresets(drStart: number, drEnd: number, scenario: Scenario) {
       hydroPPA:  Math.round(netNeeded * 0.20),
       natgas:    0,
       sofc:      0,
-      bess:      Math.min(2000, Math.round(dur * avgDrLoad * 0.22)),
+      // ESG: BESS is the sole dispatchable DR resource — sized for 2h of full netNeeded
+      bess:      Math.min(2000, Math.round(DR_DISPATCH_H * netNeeded * 0.90)),
     } as EnergyParams,
     lowCarbon: {
       selfSolar: 0,
@@ -245,14 +319,14 @@ function getDynamicPresets(drStart: number, drEnd: number, scenario: Scenario) {
       hydroPPA:  Math.round(netNeeded * 0.13),
       natgas:    0,
       sofc:      Math.round(netNeeded * 0.60),
-      bess:      Math.min(2000, Math.round(dur * avgDrLoad * 0.07)),
+      // SOFC handles 60%, BESS covers remainder for 2h dispatch
+      bess:      Math.min(2000, Math.round(DR_DISPATCH_H * netNeeded * 0.35)),
     } as EnergyParams,
   }
 }
 
-function getAIText(id: string, drStart: number, drEnd: number, drLabel: string, scenario: Scenario): string {
+function getAIText(id: string, drStart: number, _drEnd: number, drLabel: string, scenario: Scenario): string {
   const isDaytime = drStart >= 10 && drStart <= 16
-  const drStr = `${drStart}:00–${drEnd}:00`
   const contextParts = [
     scenario.existingGenKw > 0
       ? `現有 ${scenario.existingGenKw} kW ${scenario.genParalleled ? '並聯機組' : '備用機組'}`
@@ -262,13 +336,14 @@ function getAIText(id: string, drStart: number, drEnd: number, drLabel: string, 
       : '',
   ].filter(Boolean)
   const genNote = contextParts.length > 0 ? `（${contextParts.join('・')}）` : ''
+  const dispatchStr = `${drStart}:00–${drStart + DR_DISPATCH_H}:00`
   if (id === 'costMin')
-    return `【財務最大化・${drLabel}】${genNote}新增天然氣機組於 ${drStr} DR 時段強力調峰，以最低邊際成本搶佔需量反應收益。BESS 最小化以壓低 CAPEX，DR 時段依賴快速反應機組，整體碳排偏高。`
+    return `【財務最大化・${drLabel}】${genNote}天然氣機組於 DR 調度 ${dispatchStr} 滿載供電（${DR_DISPATCH_H}h 調度上限），其後維持低載待機；BESS 同步釋能 ${DR_DISPATCH_H} 小時補充峰值缺口。以最低邊際成本最大化需量反應收益，整體碳排偏高。`
   if (id === 'esg')
     return isDaytime
-      ? `【ESG 絕對優先・日峰】${genNote}白天充裕太陽能 PPA 直接供電，${drStr} 時段以大容量 BESS 釋能補充峰值。全程零天然氣，CFE 達成率近 100%，CAPEX 較高為必要代價。`
-      : `【ESG 絕對優先・夜峰】${genNote}大容量 BESS 於日間利用太陽能充電，${drStr} DR 時段完全釋能。風力 PPA 提供夜間潔淨基載，全程零化石燃料。`
-  return `【碳排最小化・${drLabel}】${genNote}SOFC 高效燃料電池（效率 60%+，碳強度低於天然氣 40%）提供穩定基載，${drStr} 時段 BESS 協同削峰。風力 PPA 補充夜間潔淨電力。`
+      ? `【ESG 絕對優先・日峰】${genNote}白天充裕太陽能 PPA 全程供電；BESS 蓄滿後於 ${dispatchStr} DR 調度期間完全釋能（${DR_DISPATCH_H}h 上限）。全程零天然氣，CFE 達成率近 100%，CAPEX 較高為必要代價。`
+      : `【ESG 絕對優先・夜峰】${genNote}大容量 BESS 於日間利用太陽能充電，DR 調度 ${dispatchStr} 期間完全釋能（${DR_DISPATCH_H}h 上限）。風力 PPA 提供夜間潔淨基載，全程零化石燃料。`
+  return `【碳排最小化・${drLabel}】${genNote}SOFC 高效燃料電池（效率 60%+，碳強度低於天然氣 40%）於 ${dispatchStr} 滿載運轉（${DR_DISPATCH_H}h 調度上限），其後降載維持基載；BESS 協同 ${DR_DISPATCH_H} 小時削峰。風力 PPA 補充夜間潔淨電力。`
 }
 
 function computeDRScores(objective: AIObjective, scenario: Scenario): DRScore[] {
@@ -283,7 +358,7 @@ function computeDRScores(objective: AIObjective, scenario: Scenario): DRScore[] 
       score      = k.drRevenue - k.capex / 20
       valueLabel = k.drRevenue >= 1e6 ? `DR ${(k.drRevenue/1e6).toFixed(1)}M/年` : `DR ${(k.drRevenue/1e4).toFixed(0)} 萬/年`
     } else if (objective === 'esg') {
-      score      = k.cfeRate * 1000 - k.capex / 1e8
+      score      = k.cfeRate * 100 - k.capex / 5e6
       valueLabel = `CFE ${(k.cfeRate * 100).toFixed(1)}%`
     } else {
       score      = -k.carbon + k.drRevenue / 300_000
@@ -302,21 +377,25 @@ function generateHourlyData(
     const hour     = h % 24
     const baseLoad = loadProfile[hour]
 
-    // Compute DR window flags first — existing gen depends on them
     const isDR   = hour >= drStart && hour < drEnd
     const nearDR = hour >= drStart - 1 && hour < drEnd + 1
     const preRamp = 2
 
+    // 台電 DR 調度每次上限 DR_DISPATCH_H 小時 — dispatchable assets (natgas/SOFC/BESS/existingGen)
+    // run at full rated capacity only during the first 2h of the DR window.
+    const drDispatchEnd = Math.min(drStart + DR_DISPATCH_H, drEnd)
+    const inDispatch    = hour >= drStart && hour < drDispatchEnd
+
     const solarFactor = hour >= 6 && hour <= 18 ? Math.sin(Math.PI * (hour - 6) / 12) : 0
 
     // ── Existing assets ───────────────────────────────────────────
-    // DR-dispatch generators ramp to full rated capacity during DR windows;
-    // they idle at ~28% outside DR (warm standby / light base load).
+    // Paralleled gen obeys the same 2h dispatch limit: full output only during inDispatch,
+    // warm standby ramp near DR, idle baseline otherwise.
     let existingGen = 0
     if (scenario.genParalleled && scenario.existingGenKw > 0) {
-      existingGen = isDR   ? scenario.existingGenKw * 0.92
-                 : nearDR  ? scenario.existingGenKw * 0.55
-                 :           scenario.existingGenKw * 0.28
+      existingGen = inDispatch ? scenario.existingGenKw * 0.92
+                 : nearDR      ? scenario.existingGenKw * 0.55
+                 :               scenario.existingGenKw * 0.28
     }
     const existingSolar = (scenario.existingSolarKw ?? 0) * solarFactor * 0.88
 
@@ -328,15 +407,23 @@ function generateHourlyData(
     const windPPA    = p.windPPA * windFactor
 
     const hydroPPA = p.hydroPPA * (0.88 + 0.05 * Math.sin(Math.PI * hour / 12))
-    const sofc     = p.sofc * 0.95
 
-    const natgasF = isDR ? 1.00 : nearDR ? 0.80 : (hour < 6 || hour >= 22 ? 0.55 : 0.45)
-    const natgas  = p.natgas * natgasF
+    // natgas: full rated output during 2h dispatch, low sustain for remainder of DR
+    const natgasF = inDispatch ? 1.00
+                  : isDR       ? 0.35
+                  : nearDR     ? 0.75
+                  : (hour < 6 || hour >= 22 ? 0.55 : 0.45)
+    const natgas = p.natgas * natgasF
 
+    // SOFC: same dispatch profile (slower ramp, slightly higher sustain floor)
+    const sofc = p.sofc * (inDispatch ? 0.95 : isDR ? 0.40 : 0.82)
+
+    // BESS: sized for DR_DISPATCH_H of discharge → fully depleted after the dispatch window
     let bess = 0
-    if (isDR)                                             bess = p.bess * 0.90
-    else if (hour >= drStart - preRamp && hour < drStart) bess = p.bess * 0.35 * ((hour - (drStart - preRamp)) / preRamp)
-    else if (hour >= drEnd && hour < drEnd + 1)           bess = p.bess * 0.15
+    if (inDispatch)                                               bess = p.bess * 0.90
+    else if (isDR)                                                bess = p.bess * 0.08  // nearly depleted
+    else if (hour >= drStart - preRamp && hour < drStart)         bess = p.bess * 0.35 * ((hour - (drStart - preRamp)) / preRamp)
+    else if (hour >= drEnd && hour < drEnd + 1)                   bess = p.bess * 0.05  // recovery start
 
     const totalSupply = existingGen + existingSolar + bess + selfSolar + solarPPA + windPPA + hydroPPA + sofc + natgas
     const grid = Math.max(0, baseLoad - totalSupply)
@@ -349,9 +436,13 @@ function calculateKPIs(p: EnergyParams, data: HourlyData[], dr: DRPeriodConfig, 
   const capex = (Object.entries(CAPEX_UNIT) as [keyof EnergyParams, number][])
     .reduce((s, [k, u]) => s + p[k] * u, 0)
 
-  const drDuration = dr.end - dr.start
-  const drCapacity = Math.min(p.natgas * 0.5 + p.bess * 0.85, scenario.peakKw * 0.35)
-  const drRevenue  = drCapacity * drDuration * dr.eventsPerYear * 5 * dr.rateMultiplier
+  // Each DR event call lasts at most DR_DISPATCH_H hours — cap revenue accordingly
+  const drDispatchHours = Math.min(DR_DISPATCH_H, dr.end - dr.start)
+  const drCapacity = Math.min(
+    p.natgas * 0.5 + (p.bess / DR_DISPATCH_H) * 0.90 + p.sofc * 0.6,
+    scenario.peakKw * 0.35,
+  )
+  const drRevenue = drCapacity * drDispatchHours * dr.eventsPerYear * 5 * dr.rateMultiplier
 
   // CFE: clean energy (new + existing solar) vs total load
   const totalLoadKwh = scenario.loadProfile.reduce((s, v) => s + v, 0)
@@ -573,11 +664,16 @@ export default function EnergyStrategy() {
   const [activePreset,      setActivePreset]      = useState<string | null>(null)
   const [presetText,        setPresetText]        = useState('')
   const [selectedDrPerModel, setSelectedDrPerModel] = useState<Record<string, string>>({})
-  const animRef   = useRef<number | null>(null)
-  const paramsRef = useRef(params)
+  const [customScenario,    setCustomScenario]    = useState<Scenario | null>(null)
+  const [csvState,          setCsvState]          = useState<'idle' | 'parsing' | 'done' | 'error'>('idle')
+  const [csvMsg,            setCsvMsg]            = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const animRef      = useRef<number | null>(null)
+  const paramsRef    = useRef(params)
   useEffect(() => { paramsRef.current = params }, [params])
 
-  const scenario = SCENARIOS.find(s => s.id === scenarioId)!
+  const allScenarios = customScenario ? [...SCENARIOS, customScenario] : SCENARIOS
+  const scenario     = allScenarios.find(s => s.id === scenarioId) ?? allScenarios[0]
   const drBase   = DR_PRESETS.find(d => d.id === drPresetId)!
   const drStart  = drPresetId === 'custom' ? customStart : drBase.start
   const drEnd    = drPresetId === 'custom' ? customEnd   : drBase.end
@@ -590,6 +686,28 @@ export default function EnergyStrategy() {
   const handleScenarioChange = (id: string) => {
     setScenarioId(id); setParams(DEFAULT_PARAMS); setActivePreset(null); setPresetText('')
     setSelectedDrPerModel({})
+  }
+
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setCsvState('parsing'); setCsvMsg('')
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const result = parseWeeklyCsv(ev.target?.result as string)
+      if (!result.ok) {
+        setCsvState('error'); setCsvMsg(result.error)
+      } else {
+        setCustomScenario(result.scenario)
+        setCsvState('done')
+        setCsvMsg(`已載入 ${result.days} 天 · 峰值 ${result.peakKw} kW`)
+        setScenarioId('custom_upload')
+        setParams(DEFAULT_PARAMS); setActivePreset(null); setPresetText(''); setSelectedDrPerModel({})
+      }
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+    reader.onerror = () => { setCsvState('error'); setCsvMsg('檔案讀取失敗') }
+    reader.readAsText(file, 'UTF-8')
   }
 
   const animateToPreset = useCallback((target: EnergyParams, id: string, text: string, bestDrId?: string) => {
@@ -687,11 +805,28 @@ export default function EnergyStrategy() {
         {/* ── Scenario Selector ─────────────────────────────── */}
         <div className="rounded-xl p-4"
           style={{ background: surface, border: `1px solid ${surfaceBorder}`, backdropFilter: 'blur(12px)' }}>
-          <p className="font-bold uppercase mb-3" style={{ fontSize: 10.5, letterSpacing: '0.08em', color: textMuted }}>
-            客戶 Case Study
-          </p>
-          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-            {SCENARIOS.map(s => {
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <p className="font-bold uppercase" style={{ fontSize: 10.5, letterSpacing: '0.08em', color: textMuted }}>
+              客戶 Case Study
+            </p>
+            {/* CSV upload status badge */}
+            {csvState === 'done' && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full font-semibold"
+                style={{ fontSize: 11, background: 'rgba(0,122,255,0.10)', border: '1px solid rgba(0,122,255,0.22)', color: '#007AFF' }}>
+                <span>📈</span>{csvMsg}
+              </div>
+            )}
+            {csvState === 'error' && (
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-full font-semibold"
+                style={{ fontSize: 11, background: 'rgba(255,59,48,0.09)', border: '1px solid rgba(255,59,48,0.22)', color: '#FF3B30' }}>
+                ⚠ {csvMsg}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
+            {/* ── Built-in scenarios ── */}
+            {allScenarios.map(s => {
               const active = scenarioId === s.id
               return (
                 <button
@@ -715,7 +850,53 @@ export default function EnergyStrategy() {
                 </button>
               )
             })}
+
+            {/* ── Upload card (always shown unless custom already loaded) ── */}
+            {!customScenario && (
+              <label
+                className="flex flex-col items-center gap-1.5 px-2 py-3 rounded-[12px] cursor-pointer transition-all duration-150 active:scale-[0.96] relative"
+                title="上傳一週用電 CSV（timestamp, load_kw）"
+                style={{
+                  background: 'transparent',
+                  border: `1.5px dashed ${csvState === 'parsing'
+                    ? '#007AFF'
+                    : isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.18)'}`,
+                  opacity: csvState === 'parsing' ? 0.7 : 1,
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,.txt"
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  onChange={handleCsvUpload}
+                  disabled={csvState === 'parsing'}
+                />
+                {csvState === 'parsing' ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin"
+                      style={{ borderColor: '#007AFF', borderTopColor: 'transparent' }} />
+                    <span style={{ fontSize: 11.5, color: '#007AFF' }}>解析中</span>
+                    <span style={{ fontSize: 11, color: textMuted }}>…</span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 22, lineHeight: 1, opacity: 0.7 }}>＋</span>
+                    <span className="font-semibold text-center leading-tight"
+                      style={{ fontSize: 11.5, color: textSecondary }}>上傳用電</span>
+                    <span style={{ fontSize: 10.5, color: textMuted }}>CSV</span>
+                  </>
+                )}
+              </label>
+            )}
           </div>
+
+          {/* CSV format hint */}
+          {csvState === 'idle' && (
+            <p className="mt-2.5" style={{ fontSize: 11, color: textMuted }}>
+              上傳格式：<span className="font-mono" style={{ color: textSecondary }}>timestamp,load_kw</span>（15 分鐘間距，至少 1 天）
+            </p>
+          )}
         </div>
 
         {/* ── KPI cards ─────────────────────────────────────── */}

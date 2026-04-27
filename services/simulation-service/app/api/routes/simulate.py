@@ -14,7 +14,6 @@ from app.assets.asset_models import (
     sofc_profile, natgas_profile,
 )
 from app import store
-from app.db import sim_store
 
 router = APIRouter()
 
@@ -224,31 +223,4 @@ def simulate(req: SimulateRequest):
         asset_ids=[a.id for a in req.assets],
     )
 
-    # Persist run (non-blocking best-effort — never fails the request)
-    sim_store.save_run(
-        baseline_id=req.data_id,
-        assets=[a.model_dump() for a in req.assets],
-        tariff=req.tariff_config.model_dump(),
-        financial=req.financial_config.model_dump(),
-        result=response.model_dump(),
-        annual_savings=sim["annual_savings"],
-        re_ratio=sim["re_ratio"],
-        total_capex=sim["total_capex"],
-    )
-
     return response
-
-
-@router.get("/history/{data_id}")
-def simulation_history(data_id: str, limit: int = 20):
-    """List recent simulation runs for a baseline (lightweight — no result blob)."""
-    return {"runs": sim_store.list_runs(data_id, limit=min(limit, 100))}
-
-
-@router.get("/history/{data_id}/{run_id}")
-def simulation_run_detail(data_id: str, run_id: str):
-    """Fetch the full SimulationResponse for a past run."""
-    result = sim_store.get_run_result(run_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return result

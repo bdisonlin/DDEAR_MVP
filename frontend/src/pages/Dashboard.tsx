@@ -338,15 +338,17 @@ export default function Dashboard() {
         </div>
       )}
       {!simResult && !isSimulating && activeTab !== 5 && (
-        <div className="card text-center py-16">
+        <div className="card text-center py-12 space-y-3">
           <div
-            className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center"
+            className="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center"
             style={{ background: 'rgba(0,122,255,0.08)', border: '1px solid rgba(0,122,255,0.14)' }}
           >
             <span style={{ fontSize: 28 }}>⚡</span>
           </div>
-          <p className="font-semibold text-gray-700 dark:text-gray-300 mb-1" style={{ fontSize: 15 }}>尚無模擬結果</p>
-          <p className="text-gray-400 dark:text-gray-500" style={{ fontSize: 13 }}>從左側加入能源資產，系統將自動執行模擬</p>
+          <p className="font-semibold text-gray-700 dark:text-gray-300" style={{ fontSize: 15 }}>尚無模擬結果</p>
+          <p className="text-gray-400 dark:text-gray-500" style={{ fontSize: 13 }}>
+            從左側「+ 新增」加入能源資產，系統將自動執行模擬
+          </p>
         </div>
       )}
 

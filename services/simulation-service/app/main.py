@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import baseline, simulate, assets, insights, demand_response, monthly_bill, settings
+from app.api.routes import baseline, simulate, assets, insights, demand_response, monthly_bill, settings, strategy
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ app.include_router(insights.router,         prefix="/api/v1/insights",          
 app.include_router(demand_response.router,  prefix="/api/v1/demand_response",   tags=["demand_response"])
 app.include_router(monthly_bill.router,     prefix="/api/v1/baseline/monthly",  tags=["baseline"])
 app.include_router(settings.router,         prefix="/api/v1/settings",          tags=["settings"])
+app.include_router(strategy.router,         prefix="/api/v1/strategy",          tags=["strategy"])
 
 
 @app.get("/health", tags=["health"])

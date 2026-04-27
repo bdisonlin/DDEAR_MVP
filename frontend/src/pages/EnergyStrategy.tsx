@@ -181,10 +181,22 @@ const DEFAULT_PARAMS: EnergyParams = {
 }
 
 // ── AI Model Scoring ──────────────────────────────────────────
-type AIObjective = 'costMin' | 'esg' | 'lowCarbon'
+// API response types from POST /api/v1/strategy/optimize
+interface ApiEnergyParams {
+  self_solar: number; solar_ppa: number; wind_ppa: number
+  hydro_ppa: number; natgas: number; sofc: number; bess: number
+}
+interface ApiKPIs { capex: number; dr_revenue: number; cfe_rate: number; carbon: number }
+interface ApiDRScore {
+  dr_id: string; dr_label: string; dr_label_sub: string
+  dr_start: number; dr_end: number; rate_multiplier: number; events_per_year: number
+  score: number; value_label: string; load_pct: number
+  params: ApiEnergyParams; kpis: ApiKPIs; ai_text: string
+}
 
-interface DRScore {
-  dr: DRPeriodConfig; score: number; valueLabel: string; params: EnergyParams
+function toEnergyParams(p: ApiEnergyParams): EnergyParams {
+  return { selfSolar: p.self_solar, solarPPA: p.solar_ppa, windPPA: p.wind_ppa,
+           hydroPPA: p.hydro_ppa, natgas: p.natgas, sofc: p.sofc, bess: p.bess }
 }
 
 // Taiwan Power DR events are dispatched for ≤ 2 hours per call.
@@ -248,125 +260,6 @@ function parseWeeklyCsv(text: string): ParseOk | ParseErr {
   }
 }
 
-function getDynamicPresets(drStart: number, drEnd: number, scenario: Scenario) {
-  const isDaytime  = drStart >= 10 && drStart <= 16
-  const isMorning  = drStart < 10
-
-  const drSlice = scenario.loadProfile.slice(drStart, Math.min(drEnd, 24))
-
-  // Use the PEAK DR_DISPATCH_H-hour block within the window as the sizing basis.
-  // DR events are called during the most demanding period — assets must handle that,
-  // not the full-window average which understates the worst case.
-  const avgDrLoad = (() => {
-    if (drSlice.length === 0) return scenario.peakKw * 0.6
-    if (drSlice.length < DR_DISPATCH_H) return drSlice.reduce((s, v) => s + v, 0) / drSlice.length
-    let peak = 0
-    for (let i = 0; i <= drSlice.length - DR_DISPATCH_H; i++) {
-      const windowAvg = drSlice.slice(i, i + DR_DISPATCH_H).reduce((s, v) => s + v, 0) / DR_DISPATCH_H
-      if (windowAvg > peak) peak = windowAvg
-    }
-    return peak
-  })()
-
-  // Existing paralleled gen + existing solar cover part of DR demand (at 2h dispatch peak)
-  const genOffset = scenario.existingGenKw * (scenario.genParalleled ? 0.9 : 0)
-  // Solar avg computed over the full DR window (not peak 2h, since solar varies continuously)
-  const existingSolarDrAvg = drSlice.reduce((s, _, i) => {
-    const h  = drStart + i
-    const sf = h >= 6 && h <= 18 ? Math.sin(Math.PI * (h - 6) / 12) * 0.88 : 0
-    return s + (scenario.existingSolarKw ?? 0) * sf
-  }, 0) / Math.max(1, drSlice.length)
-  // Net new capacity needed at peak DR load — bounded by actual scenario demand
-  const netNeeded = Math.max(0, avgDrLoad - genOffset - existingSolarDrAvg)
-
-  // Solar effectiveness of NEW assets during DR window
-  const solarAvail = drSlice.reduce((s, _, i) => {
-    const h = drStart + i
-    return s + (h >= 6 && h <= 18 ? Math.sin(Math.PI * (h - 6) / 12) * 0.85 : 0)
-  }, 0) / Math.max(1, drSlice.length)
-
-  // BESS sizing rule: DR_DISPATCH_H × power_share = kWh needed for 2-hour dispatch.
-  // natgas / SOFC: power (kW) sized to serve netNeeded during the 2-hour window.
-  return {
-    costMin: {
-      selfSolar: 0,
-      solarPPA:  solarAvail > 0.25 ? Math.round(netNeeded * 0.20) : 0,
-      windPPA:   isMorning          ? Math.round(netNeeded * 0.20) : 0,
-      hydroPPA:  0,
-      natgas:    Math.round(netNeeded * (isDaytime ? 0.70 : 0.85)),
-      sofc:      0,
-      // 2h × 15% of netNeeded → BESS stores enough for 2h of that power share
-      bess:      Math.round(Math.min(600, DR_DISPATCH_H * netNeeded * 0.15)),
-    } as EnergyParams,
-    esg: {
-      selfSolar: 0,
-      solarPPA:  solarAvail > 0.15
-        ? Math.round(netNeeded * (isDaytime ? 0.60 : 0.30))
-        : Math.round(netNeeded * 0.15),
-      windPPA:   Math.round(netNeeded * (isDaytime ? 0.15 : 0.45)),
-      hydroPPA:  Math.round(netNeeded * 0.20),
-      natgas:    0,
-      sofc:      0,
-      // ESG: BESS is the sole dispatchable DR resource — sized for 2h of full netNeeded
-      bess:      Math.min(2000, Math.round(DR_DISPATCH_H * netNeeded * 0.90)),
-    } as EnergyParams,
-    lowCarbon: {
-      selfSolar: 0,
-      solarPPA:  solarAvail > 0.15
-        ? Math.round(netNeeded * (isDaytime ? 0.25 : 0.12))
-        : 0,
-      windPPA:   Math.round(netNeeded * (isDaytime ? 0.15 : 0.38)),
-      hydroPPA:  Math.round(netNeeded * 0.13),
-      natgas:    0,
-      sofc:      Math.round(netNeeded * 0.60),
-      // SOFC handles 60%, BESS covers remainder for 2h dispatch
-      bess:      Math.min(2000, Math.round(DR_DISPATCH_H * netNeeded * 0.35)),
-    } as EnergyParams,
-  }
-}
-
-function getAIText(id: string, drStart: number, _drEnd: number, drLabel: string, scenario: Scenario): string {
-  const isDaytime = drStart >= 10 && drStart <= 16
-  const contextParts = [
-    scenario.existingGenKw > 0
-      ? `現有 ${scenario.existingGenKw} kW ${scenario.genParalleled ? '並聯機組' : '備用機組'}`
-      : '',
-    scenario.existingSolarKw
-      ? `既有 ${scenario.existingSolarKw} kW 太陽能自發自用`
-      : '',
-  ].filter(Boolean)
-  const genNote = contextParts.length > 0 ? `（${contextParts.join('・')}）` : ''
-  const dispatchStr = `${drStart}:00–${drStart + DR_DISPATCH_H}:00`
-  if (id === 'costMin')
-    return `【財務最大化・${drLabel}】${genNote}天然氣機組於 DR 調度 ${dispatchStr} 滿載供電（${DR_DISPATCH_H}h 調度上限），其後維持低載待機；BESS 同步釋能 ${DR_DISPATCH_H} 小時補充峰值缺口。以最低邊際成本最大化需量反應收益，整體碳排偏高。`
-  if (id === 'esg')
-    return isDaytime
-      ? `【ESG 絕對優先・日峰】${genNote}白天充裕太陽能 PPA 全程供電；BESS 蓄滿後於 ${dispatchStr} DR 調度期間完全釋能（${DR_DISPATCH_H}h 上限）。全程零天然氣，CFE 達成率近 100%，CAPEX 較高為必要代價。`
-      : `【ESG 絕對優先・夜峰】${genNote}大容量 BESS 於日間利用太陽能充電，DR 調度 ${dispatchStr} 期間完全釋能（${DR_DISPATCH_H}h 上限）。風力 PPA 提供夜間潔淨基載，全程零化石燃料。`
-  return `【碳排最小化・${drLabel}】${genNote}SOFC 高效燃料電池（效率 60%+，碳強度低於天然氣 40%）於 ${dispatchStr} 滿載運轉（${DR_DISPATCH_H}h 調度上限），其後降載維持基載；BESS 協同 ${DR_DISPATCH_H} 小時削峰。風力 PPA 補充夜間潔淨電力。`
-}
-
-function computeDRScores(objective: AIObjective, scenario: Scenario): DRScore[] {
-  return DR_PRESETS.filter(d => d.id !== 'custom').map(dr => {
-    const presets = getDynamicPresets(dr.start, dr.end, scenario)
-    const p    = objective === 'costMin' ? presets.costMin : objective === 'esg' ? presets.esg : presets.lowCarbon
-    const data = generateHourlyData(p, dr.start, dr.end, scenario.loadProfile, scenario)
-    const k    = calculateKPIs(p, data, dr, scenario)
-
-    let score: number, valueLabel: string
-    if (objective === 'costMin') {
-      score      = k.drRevenue - k.capex / 20
-      valueLabel = k.drRevenue >= 1e6 ? `DR ${(k.drRevenue/1e6).toFixed(1)}M/年` : `DR ${(k.drRevenue/1e4).toFixed(0)} 萬/年`
-    } else if (objective === 'esg') {
-      score      = k.cfeRate * 100 - k.capex / 5e6
-      valueLabel = `CFE ${(k.cfeRate * 100).toFixed(1)}%`
-    } else {
-      score      = -k.carbon + k.drRevenue / 300_000
-      valueLabel = `${Math.round(k.carbon).toLocaleString()} tCO₂e`
-    }
-    return { dr, score, valueLabel, params: p }
-  }).sort((a, b) => b.score - a.score)
-}
 
 // ── Data Generation ───────────────────────────────────────────
 function generateHourlyData(
@@ -408,11 +301,13 @@ function generateHourlyData(
 
     const hydroPPA = p.hydroPPA * (0.88 + 0.05 * Math.sin(Math.PI * hour / 12))
 
-    // natgas: full rated output during 2h dispatch, low sustain for remainder of DR
-    const natgasF = inDispatch ? 1.00
-                  : isDR       ? 0.35
-                  : nearDR     ? 0.75
-                  : (hour < 6 || hour >= 22 ? 0.55 : 0.45)
+    // natgas is a DR-only peaker — zero output outside the DR window.
+    // It warm-starts 1h before DR (nearDR), runs full during the 2h dispatch (inDispatch),
+    // sustains minimal load for the remainder of the DR window, then shuts off completely.
+    const natgasF = inDispatch ? 1.00   // 2h dispatch: full rated
+                  : isDR       ? 0.12   // post-dispatch sustain within DR window
+                  : nearDR     ? 0.15   // 1h warm-up before / cool-down after DR
+                  : 0                   // standby — no output outside DR context
     const natgas = p.natgas * natgasF
 
     // SOFC: same dispatch profile (slower ramp, slightly higher sustain floor)
@@ -667,13 +562,49 @@ export default function EnergyStrategy() {
   const [customScenario,    setCustomScenario]    = useState<Scenario | null>(null)
   const [csvState,          setCsvState]          = useState<'idle' | 'parsing' | 'done' | 'error'>('idle')
   const [csvMsg,            setCsvMsg]            = useState('')
+  const [aiScores,          setAiScores]          = useState<Record<string, ApiDRScore[]>>({})
+  const [aiLoading,         setAiLoading]         = useState(false)
+  const [aiError,           setAiError]           = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const animRef      = useRef<number | null>(null)
   const paramsRef    = useRef(params)
   useEffect(() => { paramsRef.current = params }, [params])
 
   const allScenarios = customScenario ? [...SCENARIOS, customScenario] : SCENARIOS
-  const scenario     = allScenarios.find(s => s.id === scenarioId) ?? allScenarios[0]
+  const _scenario    = allScenarios.find(s => s.id === scenarioId) ?? allScenarios[0]
+
+  // Fetch AI recommendations from backend whenever the scenario changes
+  useEffect(() => {
+    const ctrl = new AbortController()
+    setAiLoading(true); setAiError(null)
+    const base = (import.meta.env.VITE_SIMULATION_API_URL ?? '/api/simulation') as string
+    const body = {
+      id: _scenario.id, label: _scenario.label,
+      load_profile: _scenario.loadProfile, peak_kw: _scenario.peakKw,
+      existing_gen_kw: _scenario.existingGenKw, gen_paralleled: _scenario.genParalleled,
+      existing_solar_kw: _scenario.existingSolarKw ?? 0,
+    }
+    Promise.all((['costMin', 'esg', 'lowCarbon'] as const).map(obj =>
+      fetch(`${base}/strategy/optimize`, {
+        method: 'POST', signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scenario: body, objective: obj }),
+      }).then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(t)))
+        .then(d => [obj, d.scores as ApiDRScore[]] as const)
+    )).then(results => {
+      const map: Record<string, ApiDRScore[]> = {}
+      results.forEach(([obj, scores]) => { map[obj] = scores })
+      setAiScores(map); setAiLoading(false)
+    }).catch(err => {
+      if ((err as Error).name !== 'AbortError') {
+        setAiError('AI 引擎連線失敗，請確認後端服務已啟動')
+        setAiLoading(false)
+      }
+    })
+    return () => ctrl.abort()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarioId, customScenario])
+  const scenario = _scenario
   const drBase   = DR_PRESETS.find(d => d.id === drPresetId)!
   const drStart  = drPresetId === 'custom' ? customStart : drBase.start
   const drEnd    = drPresetId === 'custom' ? customEnd   : drBase.end
@@ -1058,15 +989,36 @@ export default function EnergyStrategy() {
               </button>
             </div>
 
-            <div className="space-y-2">
+            {aiError && (
+              <div className="rounded-[10px] px-3 py-2.5 text-sm"
+                style={{ background: 'rgba(255,59,48,0.10)', border: '1px solid rgba(255,59,48,0.25)', color: '#FF3B30' }}>
+                ⚠ {aiError}
+              </div>
+            )}
+
+            <div className="space-y-2" style={{ opacity: aiLoading ? 0.5 : 1, transition: 'opacity 0.3s' }}>
               {([
                 { id: 'costMin',   icon: '⚡', color: '#007AFF', label: '財務最大化模型',  subLabel: '成本最小化・DR 收益最大化' },
                 { id: 'esg',       icon: '🌱', color: '#34C759', label: 'ESG 永續模型',    subLabel: 'CFE 達成率・零天然氣優先' },
                 { id: 'lowCarbon', icon: '♻️', color: '#FF9500', label: '碳排最小化模型',  subLabel: 'SOFC 基載・碳強度最低化' },
               ] as const).map(model => {
-                const scores  = computeDRScores(model.id, scenario)
+                const scores  = (aiScores[model.id] ?? []) as ApiDRScore[]
                 const best    = scores[0]
                 const applied = activePreset === model.id
+
+                if (!best) return (
+                  <div key={model.id} className="rounded-[14px] overflow-hidden px-3.5 py-3 flex items-center gap-3"
+                    style={{ background: listBg, border: `1px solid ${listBorder}` }}>
+                    <div className="shrink-0 w-9 h-9 rounded-[10px] flex items-center justify-center"
+                      style={{ fontSize: 18, background: `${model.color}20` }}>{model.icon}</div>
+                    <div>
+                      <div className="font-bold" style={{ fontSize: 14, color: textPrimary }}>{model.label}</div>
+                      <div style={{ fontSize: 12, color: textSecondary }}>
+                        {aiLoading ? '計算中…' : '—'}
+                      </div>
+                    </div>
+                  </div>
+                )
 
                 return (
                   <div key={model.id} className="rounded-[14px] overflow-hidden"
@@ -1077,9 +1029,8 @@ export default function EnergyStrategy() {
 
                     <button
                       onClick={() => {
-                        animateToPreset(best.params, model.id,
-                          getAIText(model.id, best.dr.start, best.dr.end, best.dr.label, scenario), best.dr.id)
-                        setSelectedDrPerModel(prev => ({ ...prev, [model.id]: best.dr.id }))
+                        animateToPreset(toEnergyParams(best.params), model.id, best.ai_text, best.dr_id)
+                        setSelectedDrPerModel(prev => ({ ...prev, [model.id]: best.dr_id }))
                       }}
                       className="w-full flex items-center gap-3 px-3.5 py-3 text-left transition-all duration-150 active:opacity-70"
                       style={{ background: applied ? model.color : 'transparent' }}>
@@ -1102,7 +1053,7 @@ export default function EnergyStrategy() {
                           style={{ fontSize: 12,
                                    background: applied ? 'rgba(255,255,255,0.22)' : `${model.color}18`,
                                    color: applied ? '#fff' : model.color }}>
-                          {best.valueLabel}
+                          {best.value_label}
                         </div>
                         <svg width="6" height="10" viewBox="0 0 6 10" fill="none" className="shrink-0"
                           style={{ color: applied ? 'rgba(255,255,255,0.7)' : model.color, opacity: applied ? 0.9 : 0.5 }}>
@@ -1116,13 +1067,12 @@ export default function EnergyStrategy() {
                       style={{ borderTop: `1px solid ${applied ? model.color+'40' : listBorder}` }}>
                       {scores.map((s, rank) => {
                         const selDr = selectedDrPerModel[model.id]
-                        const isSelected = selDr ? selDr === s.dr.id : rank === 0
+                        const isSelected = selDr ? selDr === s.dr_id : rank === 0
                         return (
-                          <button key={s.dr.id}
+                          <button key={s.dr_id}
                             onClick={() => {
-                              animateToPreset(s.params, model.id,
-                                getAIText(model.id, s.dr.start, s.dr.end, s.dr.label, scenario), s.dr.id)
-                              setSelectedDrPerModel(prev => ({ ...prev, [model.id]: s.dr.id }))
+                              animateToPreset(toEnergyParams(s.params), model.id, s.ai_text, s.dr_id)
+                              setSelectedDrPerModel(prev => ({ ...prev, [model.id]: s.dr_id }))
                             }}
                             className="flex-1 rounded-[10px] px-2 py-2 text-center active:opacity-70"
                             style={{
@@ -1139,12 +1089,16 @@ export default function EnergyStrategy() {
                             <div className="font-semibold leading-tight truncate"
                               style={{ fontSize: 12, color: isSelected ? model.color : textSecondary,
                                        transition: 'color 0.15s' }}>
-                              {s.dr.label}
+                              {s.dr_label}
                             </div>
                             <div className="leading-snug mt-0.5 font-mono font-bold truncate"
                               style={{ fontSize: 11, color: isSelected ? model.color : textMuted,
                                        opacity: isSelected ? 1 : 0.65, transition: 'color 0.15s, opacity 0.15s' }}>
-                              {s.valueLabel}
+                              {s.value_label}
+                            </div>
+                            <div className="leading-none mt-0.5 truncate"
+                              style={{ fontSize: 10, color: textMuted, opacity: isSelected ? 0.8 : 0.45 }}>
+                              負載吻合 {s.load_pct}%
                             </div>
                           </button>
                         )

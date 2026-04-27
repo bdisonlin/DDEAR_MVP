@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSandboxStore } from '@/store/useSandboxStore'
-import { generateSample, uploadBaseline, runSimulation, fetchInsights } from '@/api/simulation'
+import { generateSample, uploadBaseline, runSimulation, fetchInsights, DEMO_ASSETS } from '@/api/simulation'
 import { runDemandResponse } from '@/api/demand_response'
 import AssetForm from '@/components/sandbox/AssetForm'
 import MonthlyBillForm from '@/components/sidebar/MonthlyBillForm'
@@ -68,6 +68,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
     assets, addAsset, removeAsset, clearAssets,
     setSimResult, setIsSimulating, setSimError, isSimulating,
     setInsights, setIsLoadingInsights,
+    tariff, financial,
     drConfig, setDrConfig,
     setDrResult, isDrSimulating, setIsDrSimulating, setDrError,
   } = useSandboxStore()
@@ -80,15 +81,30 @@ export default function Sidebar({ onClose }: SidebarProps) {
   const [inputMode, setInputMode]         = useState<InputMode>('sample')
   const [reHint, setReHint]               = useState<{ kwh: number; cap: number } | null>(null)
 
+  // Load demo baseline + preset assets + run simulation in one step
   const handleSample = async () => {
     setLoadingBaseline(true)
+    setSimError(null)
     try {
       const b = await generateSample(peakKw, year)
-      setBaseline(b)
+      setBaseline(b)               // clears assets & simResult
+      clearAssets()
+      DEMO_ASSETS.forEach(addAsset)
       navigate('/')
       onClose?.()
-    } catch (e: unknown) { alert((e as Error).message) }
-    finally { setLoadingBaseline(false) }
+      setIsSimulating(true)
+      const result = await runSimulation(b.data_id, DEMO_ASSETS, tariff, financial)
+      setSimResult(result)
+      setIsLoadingInsights(true)
+      fetchInsights(result, DEMO_ASSETS.map(a => a.type))
+        .then(setInsights).catch(() => setInsights([]))
+        .finally(() => setIsLoadingInsights(false))
+    } catch (e: unknown) {
+      setSimError((e as Error).message)
+    } finally {
+      setLoadingBaseline(false)
+      setIsSimulating(false)
+    }
   }
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -210,13 +226,13 @@ export default function Sidebar({ onClose }: SidebarProps) {
                       {[2022, 2023, 2024, 2025].map(y => <option key={y}>{y}</option>)}
                     </select>
                   </div>
-                  <button className="btn-primary w-full" onClick={handleSample} disabled={loadingBaseline}>
-                    {loadingBaseline
-                      ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />載入中</>
-                      : '載入示範資料'}
+                  <button className="btn-primary w-full" onClick={handleSample} disabled={loadingBaseline || isSimulating}>
+                    {loadingBaseline || isSimulating
+                      ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />模擬運算中…</>
+                      : '🚀 一鍵載入示範'}
                   </button>
-                  <p className="text-center text-gray-400 dark:text-gray-500" style={{ fontSize: 11.5 }}>
-                    合成 1000 kW 工廠典型負載
+                  <p className="text-center text-gray-400 dark:text-gray-500" style={{ fontSize: 11 }}>
+                    合成負載 · 加入太陽能 + 儲能 + 風力 · 自動出圖
                   </p>
                 </div>
               )}

@@ -1,5 +1,8 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useSandboxStore } from '@/store/useSandboxStore'
 import { useTilt } from '@/hooks/useTilt'
+import { generateSample, runSimulation, fetchInsights, DEMO_ASSETS } from '@/api/simulation'
 
 const ASSET_ICONS: Record<string, string> = {
   solar_self: '☀️', solar_purchase: '☀️', wind: '💨', hydro: '💧',
@@ -55,7 +58,42 @@ const STEPS = [
 ]
 
 export default function Welcome() {
+  const navigate = useNavigate()
   const assetTypes = useSandboxStore((s) => s.assetTypes)
+  const { setBaseline, setSimResult, setIsSimulating, setSimError,
+          setInsights, setIsLoadingInsights, clearAssets, addAsset, tariff, financial } = useSandboxStore()
+  const [loadingDemo, setLoadingDemo] = useState(false)
+
+  const handleLoadDemo = async () => {
+    setLoadingDemo(true)
+    setSimError(null)
+    try {
+      // 1. Generate baseline
+      const b = await generateSample(1000, 2024)
+      setBaseline(b)
+
+      // 2. Populate demo assets in store
+      clearAssets()
+      DEMO_ASSETS.forEach(addAsset)
+
+      // 3. Run simulation
+      setIsSimulating(true)
+      navigate('/')
+      const result = await runSimulation(b.data_id, DEMO_ASSETS, tariff, financial)
+      setSimResult(result)
+
+      // 4. Fetch AI insights
+      setIsLoadingInsights(true)
+      fetchInsights(result, DEMO_ASSETS.map(a => a.type))
+        .then(setInsights).catch(() => setInsights([]))
+        .finally(() => setIsLoadingInsights(false))
+    } catch (e: unknown) {
+      setSimError((e as Error).message)
+    } finally {
+      setIsSimulating(false)
+      setLoadingDemo(false)
+    }
+  }
 
   return (
     <div className="max-w-2xl mx-auto text-center py-14 space-y-10 animate-fade-up px-4">
@@ -92,9 +130,34 @@ export default function Welcome() {
         </div>
       </div>
 
+      {/* ── Demo CTA ── */}
+      <div className="card text-center py-6 space-y-3"
+        style={{ background: 'linear-gradient(135deg, rgba(0,122,255,0.06), rgba(88,86,214,0.06))',
+                 borderColor: 'rgba(0,122,255,0.14)' }}>
+        <p className="font-semibold text-gray-700 dark:text-gray-200" style={{ fontSize: 15 }}>
+          想直接看結果？
+        </p>
+        <p className="text-gray-400 dark:text-gray-500" style={{ fontSize: 13 }}>
+          載入 1,000 kW 示範工廠 · 太陽能 300kW + 儲能 1,000kWh + 風力 PPA 150kW
+        </p>
+        <button
+          onClick={handleLoadDemo}
+          disabled={loadingDemo}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-[12px] font-semibold transition-all active:scale-95"
+          style={{ fontSize: 15,
+                   background: loadingDemo ? 'rgba(0,122,255,0.15)' : 'linear-gradient(135deg, #007AFF, #5856D6)',
+                   color: loadingDemo ? '#007AFF' : '#fff',
+                   boxShadow: loadingDemo ? 'none' : '0 4px 16px rgba(0,122,255,0.35)',
+                   border: '1px solid transparent' }}>
+          {loadingDemo
+            ? <><span className="w-4 h-4 border-2 border-ios-blue border-t-transparent rounded-full animate-spin" />計算中…</>
+            : '🚀 一鍵載入示範資料'}
+        </button>
+      </div>
+
       {/* ── Quick Start Steps ── */}
       <div className="card text-left">
-        <p className="section-title mb-4">快速開始</p>
+        <p className="section-title mb-4">快速開始（手動設定）</p>
         <div className="space-y-3">
           {STEPS.map(({ n, text, color, icon }) => (
             <div key={n} className="flex items-start gap-4 group">

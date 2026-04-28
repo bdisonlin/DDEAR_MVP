@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout from '@/components/layout/Layout'
-import Welcome from '@/pages/Welcome'
 import Dashboard from '@/pages/Dashboard'
 import EnergyStrategy from '@/pages/EnergyStrategy'
 import { useSandboxStore } from '@/store/useSandboxStore'
@@ -10,7 +9,6 @@ import Settings from '@/pages/Settings'
 
 export default function App() {
   const setAssetTypes = useSandboxStore((s) => s.setAssetTypes)
-  const baseline = useSandboxStore((s) => s.baseline)
 
   useEffect(() => {
     getAssetTypes().then(setAssetTypes).catch(console.error)
@@ -19,8 +17,7 @@ export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={baseline ? <Dashboard /> : <Welcome />} />
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/" element={<Dashboard />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/strategy" element={<EnergyStrategy />} />
       </Routes>

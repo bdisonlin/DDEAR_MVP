@@ -6,9 +6,11 @@ import CostChart from '@/components/charts/CostChart'
 import RoiChart from '@/components/charts/RoiChart'
 import HeatmapChart from '@/components/charts/HeatmapChart'
 import DrChart from '@/components/charts/DrChart'
+import MonthlyBillForm from '@/components/sidebar/MonthlyBillForm'
 import { fmtNtd, fmtPct } from '@/utils/formatters'
-import type { Insight, DRSettlement } from '@/types'
-import Welcome from './Welcome'
+import type { Insight, DRSettlement, MonthlyBillSummary } from '@/types'
+import { generateSample, uploadBaseline, runSimulation, fetchInsights, DEMO_ASSETS } from '@/api/simulation'
+import clsx from 'clsx'
 
 const TABS = [
   { label: '總覽',    icon: '▦', color: '#007AFF' },
@@ -296,13 +298,240 @@ function DrTab({ drResult, isDrSimulating, drError }: {
 
 const MONTH_LABELS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']
 
+/* ── Empty-state: data loading panel (shown when no baseline) ── */
+type InputMode = 'sample' | 'csv' | 'bill'
+
+function EmptyState() {
+  const {
+    setBaseline, clearAssets, addAsset,
+    setSimResult, setIsSimulating, setSimError, isSimulating,
+    setInsights, setIsLoadingInsights, tariff, financial,
+  } = useSandboxStore()
+  const [inputMode, setInputMode] = useState<InputMode>('sample')
+  const [peakKw, setPeakKw]       = useState(1000)
+  const [year, setYear]           = useState(2024)
+  const [loading, setLoading]     = useState(false)
+
+  const handleSample = async () => {
+    setLoading(true)
+    setSimError(null)
+    try {
+      const b = await generateSample(peakKw, year)
+      setBaseline(b)
+      clearAssets()
+      DEMO_ASSETS.forEach(addAsset)
+      setIsSimulating(true)
+      const result = await runSimulation(b.data_id, DEMO_ASSETS, tariff, financial)
+      setSimResult(result)
+      setIsLoadingInsights(true)
+      fetchInsights(result, DEMO_ASSETS.map(a => a.type))
+        .then(setInsights).catch(() => setInsights([]))
+        .finally(() => setIsLoadingInsights(false))
+    } catch (e: unknown) {
+      setSimError((e as Error).message)
+    } finally {
+      setLoading(false)
+      setIsSimulating(false)
+    }
+  }
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLoading(true)
+    try {
+      const b = await uploadBaseline(file)
+      setBaseline(b)
+    } catch (err: unknown) { alert((err as Error).message) }
+    finally { setLoading(false) }
+  }
+
+  const handleBillSuccess = (result: MonthlyBillSummary) => {
+    setBaseline(result)
+  }
+
+  const busy = loading || isSimulating
+
+  const FEATURES = [
+    { icon: '💰', label: '電費節省試算',   desc: '準確計算 TOU 時間電價差額與需量費扣減',   color: '#34C759' },
+    { icon: '🌿', label: '碳排分析',       desc: '台電排放係數即時換算，RE% 達成率追蹤',     color: '#AF52DE' },
+    { icon: '📈', label: 'ROI 財務回收',   desc: 'CAPEX / NPV / IRR，20 年現金流量試算',    color: '#5856D6' },
+    { icon: '🤖', label: 'AI 智慧洞察',   desc: 'Claude AI 分析能源優化策略與風險提示',     color: '#007AFF' },
+  ]
+
+  return (
+    <div className="min-h-full flex items-center py-10 px-6 md:px-10 animate-fade-up">
+      {/* Two-column layout: left=branding, right=form */}
+      <div className="w-full grid grid-cols-1 md:grid-cols-[1fr_1.05fr] gap-8 md:gap-14 items-center">
+
+        {/* ── Left: identity + features ── */}
+        <div className="space-y-8 md:py-4">
+
+          {/* Logo + title */}
+          <div className="space-y-4">
+            <div
+              className="w-14 h-14 rounded-[18px] flex items-center justify-center"
+              style={{
+                background: 'linear-gradient(145deg, #1a8aff, #5856D6)',
+                boxShadow: '0 10px 28px rgba(0,122,255,0.30), inset 0 1.5px 0 rgba(255,255,255,0.28)',
+              }}
+            >
+              <span style={{ fontSize: 26 }}>⚡</span>
+            </div>
+            <div>
+              <h1 className="font-bold text-gray-900 dark:text-white tracking-tight" style={{ fontSize: 30 }}>
+                DDEAR
+              </h1>
+              <p className="font-data text-gray-400 dark:text-gray-500 uppercase tracking-widest mt-0.5" style={{ fontSize: 10.5 }}>
+                Dynamic Digital Energy Asset ROI
+              </p>
+            </div>
+            <p className="text-gray-500 dark:text-gray-400 leading-relaxed" style={{ fontSize: 14.5, maxWidth: 360 }}>
+              載入工廠用電資料，數位孿生模擬太陽能、儲能、需量反應等能源資產的成本效益與投資回收
+            </p>
+          </div>
+
+          {/* Feature list */}
+          <div className="space-y-4">
+            {FEATURES.map(({ icon, label, desc, color }) => (
+              <div key={label} className="flex items-start gap-3.5">
+                <div
+                  className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 mt-0.5"
+                  style={{
+                    background: `${color}10`,
+                    border: `1px solid ${color}22`,
+                    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.5)`,
+                  }}
+                >
+                  <span style={{ fontSize: 17 }}>{icon}</span>
+                </div>
+                <div>
+                  <div className="font-semibold" style={{ fontSize: 13.5, color }}>{label}</div>
+                  <div className="text-gray-400 dark:text-gray-500 leading-relaxed" style={{ fontSize: 12.5 }}>{desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Right: input form card ── */}
+        <div className="card space-y-5">
+
+          {/* Segment control */}
+          <div className="segment-ctrl">
+            {([
+              { id: 'sample', label: '示範資料' },
+              { id: 'csv',    label: 'CSV 上傳' },
+              { id: 'bill',   label: '電費單' },
+            ] as { id: InputMode; label: string }[]).map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setInputMode(tab.id)}
+                className={clsx('segment-btn', inputMode === tab.id && 'active')}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Sample mode ── */}
+          {inputMode === 'sample' && (
+            <div className="space-y-4 animate-scale-in">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">尖峰需量</label>
+                  <div className="relative">
+                    <input
+                      className="input pr-8"
+                      type="number" value={peakKw}
+                      onChange={(e) => setPeakKw(+e.target.value)}
+                      min={100} max={50000} step={100}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                      style={{ fontSize: 11 }}>kW</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="label">年份</label>
+                  <select className="input" value={year} onChange={(e) => setYear(+e.target.value)}>
+                    {[2022, 2023, 2024, 2025].map(y => <option key={y}>{y}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <button
+                className="btn-primary w-full"
+                onClick={handleSample}
+                disabled={busy}
+                style={{ paddingTop: 12, paddingBottom: 12, fontSize: 14.5 }}
+              >
+                {busy
+                  ? <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />模擬運算中…</>
+                  : '🚀 一鍵載入示範'}
+              </button>
+
+              {/* Preset summary */}
+              <div
+                className="rounded-[10px] px-3.5 py-3 space-y-1.5"
+                style={{ background: 'rgba(0,122,255,0.04)', border: '1px solid rgba(0,122,255,0.10)' }}
+              >
+                <p className="font-semibold text-ios-blue" style={{ fontSize: 11.5 }}>預設示範資產組合</p>
+                {[
+                  { icon: '☀️', text: '屋頂太陽能 300 kW' },
+                  { icon: '🔋', text: '儲能 BESS 1,000 kWh / 500 kW' },
+                  { icon: '💨', text: '風力 PPA 150 kW' },
+                ].map(({ icon, text }) => (
+                  <div key={text} className="flex items-center gap-2 text-gray-400 dark:text-gray-500"
+                    style={{ fontSize: 12 }}>
+                    <span style={{ fontSize: 13 }}>{icon}</span>
+                    {text}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── CSV mode ── */}
+          {inputMode === 'csv' && (
+            <div className="space-y-3 animate-scale-in">
+              <label className={clsx('btn-glass w-full cursor-pointer', busy && 'opacity-40 pointer-events-none')}>
+                {busy
+                  ? <><div className="w-4 h-4 border-2 border-ios-blue/40 border-t-ios-blue rounded-full animate-spin-slow" />上傳中…</>
+                  : '📂 選擇 CSV 檔案'}
+                <input type="file" accept=".csv" className="hidden" onChange={handleUpload} />
+              </label>
+              <div
+                className="rounded-[10px] p-3.5 space-y-1.5"
+                style={{ background: 'rgba(0,0,0,0.025)', border: '1px solid rgba(0,0,0,0.06)' }}
+              >
+                <p className="font-semibold text-gray-500 dark:text-gray-400" style={{ fontSize: 11.5 }}>格式要求</p>
+                <p className="font-data text-gray-400 dark:text-gray-500" style={{ fontSize: 11 }}>欄位：timestamp, load_kw</p>
+                <p className="font-data text-gray-400 dark:text-gray-500" style={{ fontSize: 11 }}>2024-01-01 00:00, 850.2</p>
+                <p className="text-gray-400 dark:text-gray-500 mt-1" style={{ fontSize: 11 }}>15 分鐘間隔 · 至少涵蓋 1 天</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Bill mode ── */}
+          {inputMode === 'bill' && (
+            <div className="animate-scale-in">
+              <MonthlyBillForm onSuccess={handleBillSuccess} />
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { simResult, isSimulating, simError, baseline, drResult, isDrSimulating, drError } = useSandboxStore()
   const [activeTab, setActiveTab] = useState(0)
   const [selectedMonth, setSelectedMonth] = useState(7)
   const [selectedWeek, setSelectedWeek] = useState(2)
 
-  if (!baseline) return <Welcome />
+  if (!baseline) return <EmptyState />
 
   return (
     <div className="space-y-4 animate-fade-up">

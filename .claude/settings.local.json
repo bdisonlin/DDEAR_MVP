@@ -6,7 +6,28 @@
       "Bash(python3 -c ' *)",
       "Bash(python3 -m streamlit run app.py --server.headless true --server.port 8501)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501)",
-      "Read(//Users/bdison.lin/Documents/python/DDEAR_MTV/services/simulation-service/app/api/routes/**)"
+      "Read(//Users/bdison.lin/Documents/python/DDEAR_MTV/services/simulation-service/app/api/routes/**)",
+      "Bash(python3)",
+      "Bash(find /Users/bdison.lin -name \"test_sample.csv\" 2>/dev/null | head -5)",
+      "Read(//Users/bdison.lin/**)",
+      "Bash(python3 -)",
+      "Bash(docker restart *)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/monthly-bill -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/monthly-bill -H 'Content-Type: application/json' -d '{\"year\":2024,\"bill_type\":\"com_3tier\",\"voltage\":\"high\",\"industry_type\":\"heavy_industry\",\"use_industry_shape\":false,\"rows\":[{\"month\":6,\"peak_kwh\":24043,\"semi_kwh\":193471,\"sat_kwh\":48228,\"offpeak_kwh\":152037}]}')",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if k in ['peak_kw','avg_kw','total_kwh','annual_cost_ntd']}, indent=2\\)\\)\")",
+      "Bash(curl -s -X POST http://localhost:8000/monthly-bill -H 'Content-Type: application/json' -d '{\"year\":2024,\"bill_type\":\"com_3tier\",\"voltage\":\"high\",\"industry_type\":\"heavy_industry\",\"use_industry_shape\":false,\"rows\":[{\"month\":6,\"peak_kwh\":24043,\"semi_kwh\":193471,\"sat_kwh\":48228,\"offpeak_kwh\":152037}]}')",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\('peak_kw','?'\\), 'kW peak'\\)\")",
+      "Bash(curl -s http://localhost:8000/openapi.json)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k\\) for k in d.get\\('paths',{}\\).keys\\(\\)]\")",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/baseline/monthly -H 'Content-Type: application/json' -d '{\"year\":2024,\"bill_type\":\"com_3tier\",\"voltage\":\"high\",\"industry_type\":\"heavy_industry\",\"use_industry_shape\":false,\"rows\":[{\"month\":6,\"peak_kwh\":24043,\"semi_kwh\":193471,\"sat_kwh\":48228,\"offpeak_kwh\":152037}]}')",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'peak_kw={d[\\\\\"peak_kw\\\\\"]:.0f} kW, total={d[\\\\\"total_kwh\\\\\"]/1e6:.3f} GWh'\\)\")",
+      "Bash(md5 /Users/bdison.lin/Documents/python/DDEAR_MVP/frontend/src/pages/Dashboard.tsx)",
+      "Bash(kill 44971 44972)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(git commit -m ' *)",
+      "Bash(docker-compose logs *)",
+      "Bash(docker-compose build *)",
+      "Bash(xargs sed -n '30,100p')"
     ]
   }
 }

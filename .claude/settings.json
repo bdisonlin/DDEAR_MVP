@@ -3,7 +3,11 @@
     "allow": [
       "Bash(go mod *)",
       "Read(//usr/local/go/**)",
-      "Read(//opt/homebrew/bin/**)"
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(gh run *)",
+      "Bash(git commit -m ' *)",
+      "Bash(xargs ls *)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

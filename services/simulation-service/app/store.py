@@ -31,10 +31,11 @@ _CACHE_MODE = redis_client is not None
 
 @dataclass
 class BaselineRecord:
-    series:        pd.Series
-    voltage:       str            = "high"
-    contracted_kw: Optional[float] = None
-    bill_type:     str            = "tiered"
+    series:           pd.Series
+    voltage:          str            = "high"
+    contracted_kw:    Optional[float] = None
+    bill_type:        str            = "tiered"
+    baseline_re_series: Optional[pd.Series] = None   # bill-derived RE generation curve
 
 
 # ── Serialisation helpers ──────────────────────────────────────────────────────
@@ -59,6 +60,10 @@ def _series_key(data_id: str) -> str:
     return f"baseline:{data_id}:series"
 
 
+def _re_series_key(data_id: str) -> str:
+    return f"baseline:{data_id}:re_series"
+
+
 # ── In-memory fallback (no DB configured) ──────────────────────────────────────
 
 _mem_lock:  threading.Lock           = threading.Lock()
@@ -68,17 +73,19 @@ _mem_store: dict[str, BaselineRecord] = {}
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def save(
-    data_id:       str,
-    series:        pd.Series,
-    voltage:       str   = "high",
-    contracted_kw: Optional[float] = None,
-    bill_type:     str   = "tiered",
+    data_id:           str,
+    series:            pd.Series,
+    voltage:           str   = "high",
+    contracted_kw:     Optional[float] = None,
+    bill_type:         str   = "tiered",
+    baseline_re_series: Optional[pd.Series] = None,
 ) -> None:
     if not _DB_MODE:
         with _mem_lock:
             _mem_store[data_id] = BaselineRecord(
                 series=series, voltage=voltage,
                 contracted_kw=contracted_kw, bill_type=bill_type,
+                baseline_re_series=baseline_re_series,
             )
         return
 
@@ -127,6 +134,9 @@ def save(
             redis_client.setex(_series_key(data_id), BASELINE_TTL_S, blob)
             redis_client.setex(_meta_key(data_id),   BASELINE_TTL_S,
                                json.dumps(meta).encode())
+            if baseline_re_series is not None:
+                redis_client.setex(_re_series_key(data_id), BASELINE_TTL_S,
+                                   _pack(baseline_re_series))
         except Exception as exc:
             logger.warning("Redis write failed (non-fatal): %s", exc)
 
@@ -143,7 +153,9 @@ def load(data_id: str) -> Optional[BaselineRecord]:
             meta_raw = redis_client.get(_meta_key(data_id))
             if blob and meta_raw:
                 meta = json.loads(meta_raw)
-                return BaselineRecord(series=_unpack(blob), **meta)
+                re_blob = redis_client.get(_re_series_key(data_id))
+                re_series = _unpack(re_blob) if re_blob else None
+                return BaselineRecord(series=_unpack(blob), baseline_re_series=re_series, **meta)
         except Exception as exc:
             logger.warning("Redis read failed (non-fatal): %s", exc)
 
@@ -167,6 +179,16 @@ def load(data_id: str) -> Optional[BaselineRecord]:
         "bill_type":     row.bill_type,
     }
 
+    # Try to fetch RE series from Redis (not in PostgreSQL schema)
+    re_series = None
+    if _CACHE_MODE:
+        try:
+            re_blob = redis_client.get(_re_series_key(data_id))
+            if re_blob:
+                re_series = _unpack(re_blob)
+        except Exception as exc:
+            logger.warning("Redis RE series read failed (non-fatal): %s", exc)
+
     # Re-warm Redis
     if _CACHE_MODE:
         try:
@@ -176,7 +198,7 @@ def load(data_id: str) -> Optional[BaselineRecord]:
         except Exception as exc:
             logger.warning("Redis re-warm failed (non-fatal): %s", exc)
 
-    return BaselineRecord(series=series, **meta)
+    return BaselineRecord(series=series, baseline_re_series=re_series, **meta)
 
 
 def delete(data_id: str) -> None:

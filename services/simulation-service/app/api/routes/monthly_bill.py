@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.schemas.monthly_bill import MonthlyBillRequest, MonthlyBillSummary, ReSourceConfig
 from app.core.monthly_synthesis import synthesize_from_monthly, distribute_re_to_periods
+from app.core.re_profiles import build_re_timeseries
 from app.core.tariff import calculate_electricity_cost
 from app import store
 
@@ -50,12 +51,6 @@ def create_from_monthly_bill(req: MonthlyBillRequest):
         raise HTTPException(status_code=422, detail=f"合成失敗：{exc}")
 
     data_id = str(uuid.uuid4())[:12]
-    store.save(
-        data_id, series,
-        voltage=req.voltage,
-        contracted_kw=req.contracted_kw,
-        bill_type=req.bill_type,
-    )
 
     monthly_cost = calculate_electricity_cost(
         series,
@@ -140,6 +135,27 @@ def create_from_monthly_bill(req: MonthlyBillRequest):
         suggested_cap = round(total_re_kwh / (8760 * cf), 1)
     else:
         suggested_cap = 0.0
+
+    # ── Synthesize 15-min RE generation curve and persist with baseline ───────
+    # Uses pre-computed DB profiles (seasonal + intra-day shape), then
+    # calibrates each month's total to match the actual metered re_kwh.
+    baseline_re_series = None
+    if configs and total_re_kwh > 0:
+        baseline_re_series = build_re_timeseries(
+            rows=req.rows,
+            configs=configs,
+            proportions=proportions,
+            index=series.index,
+            year=req.year,
+        )
+
+    store.save(
+        data_id, series,
+        voltage=req.voltage,
+        contracted_kw=req.contracted_kw,
+        bill_type=req.bill_type,
+        baseline_re_series=baseline_re_series,
+    )
 
     return MonthlyBillSummary(
         data_id=data_id,

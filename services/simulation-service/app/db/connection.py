@@ -48,6 +48,14 @@ SIM_RESULT_TTL_S = 3_600   #  1 h — simulation result cache
 # ── Schema bootstrap ───────────────────────────────────────────────────────────
 
 _DDL = """
+CREATE TABLE IF NOT EXISTS re_generation_profiles (
+    source_type  VARCHAR(32)  NOT NULL,
+    year         INTEGER      NOT NULL,
+    series_gz    BYTEA        NOT NULL,
+    created_at   TIMESTAMPTZ  DEFAULT NOW(),
+    PRIMARY KEY (source_type, year)
+);
+
 CREATE TABLE IF NOT EXISTS baselines (
     id              VARCHAR(12)  PRIMARY KEY,
     created_at      TIMESTAMPTZ  DEFAULT NOW(),

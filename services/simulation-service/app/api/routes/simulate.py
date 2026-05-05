@@ -13,6 +13,7 @@ from app.assets.asset_models import (
     hvac_savings_profile, ev_charging_profile,
     sofc_profile, natgas_profile,
 )
+from app.core.re_profiles import get_or_create_re_profile
 from app import store
 
 router = APIRouter()
@@ -26,11 +27,18 @@ def _build_tariff(tc):
 
 
 def _build_profile(atype, params, index, baseline):
-    cap = params.capacity_kw or 100.0
+    cap  = params.capacity_kw or 100.0
+    year = index[0].year if len(index) > 0 else 2024
     if atype in ("solar_self", "solar_purchase"):
-        return solar_profile(index, cap)
+        # Use DB profile for consistent physics with bill-upload path
+        db_profile = get_or_create_re_profile("solar_pv", year)
+        aligned    = db_profile.reindex(index, method="nearest", tolerance="1min").fillna(0.0)
+        return aligned * cap
     elif atype == "wind":
-        return wind_profile(index, cap, params.capacity_factor or 0.30)
+        source = "offshore_wind" if (params.capacity_factor or 0.30) >= 0.35 else "onshore_wind"
+        db_profile = get_or_create_re_profile(source, year)
+        aligned    = db_profile.reindex(index, method="nearest", tolerance="1min").fillna(0.0)
+        return aligned * cap
     elif atype == "hydro":
         return hydro_profile(index, cap, params.capacity_factor or 0.40)
     elif atype == "hvac":
@@ -161,16 +169,22 @@ def simulate(req: SimulateRequest):
         cumulative_cash_flows=list(cumulative) if hasattr(cumulative, "tolist") else cumulative,
     )
 
+    # If no RE assets were modelled but the baseline has a stored bill-derived
+    # RE curve, use it so the load chart shows green-energy generation.
+    re_generation = sim["re_generation"]
+    if re_generation.sum() == 0 and record.baseline_re_series is not None:
+        re_generation = record.baseline_re_series.reindex(re_generation.index, fill_value=0.0)
+
     year = baseline.index[0].year
     start, end = _representative_week(year)
     try:
         week_b  = baseline[start:end]
         week_s  = sim["net_load"][start:end]
-        week_re = sim["re_generation"][start:end]
+        week_re = re_generation[start:end]
     except Exception:
         week_b  = baseline.iloc[:672]
         week_s  = sim["net_load"].iloc[:672]
-        week_re = sim["re_generation"].iloc[:672]
+        week_re = re_generation.iloc[:672]
 
     load_chart = [
         LoadChartPoint(
@@ -202,7 +216,7 @@ def simulate(req: SimulateRequest):
             try:
                 wb = baseline[w_start:w_end]
                 ws = sim["net_load"][w_start:w_end]
-                wr = sim["re_generation"][w_start:w_end]
+                wr = re_generation[w_start:w_end]
                 if len(wb) >= 96:
                     load_chart_by_month[f"{m}_{w}"] = [
                         LoadChartPoint(

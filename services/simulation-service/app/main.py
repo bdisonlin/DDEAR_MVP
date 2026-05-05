@@ -18,6 +18,21 @@ async def lifespan(app: FastAPI):
         init_db()
     except Exception as exc:
         logger.warning("DB init failed — continuing in in-memory mode: %s", exc)
+
+    # Pre-compute RE generation profiles for recent years and store in PostgreSQL.
+    # Runs on every cold start; ON CONFLICT DO NOTHING skips already-stored rows,
+    # so this is safe and fast after the first deployment in any environment.
+    try:
+        import asyncio
+        from datetime import datetime
+        from app.core.re_profiles import prewarm_profiles
+        current_year = datetime.now().year
+        years = list(range(current_year - 4, current_year + 3))
+        await asyncio.to_thread(prewarm_profiles, years)
+        logger.info("RE profile prewarm complete: %s", years)
+    except Exception as exc:
+        logger.warning("RE profile prewarm failed (non-fatal): %s", exc)
+
     yield
     # ── Shutdown (nothing to clean up) ─────────────────────────────────────────
 

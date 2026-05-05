@@ -400,3 +400,84 @@ def synthesize_from_monthly(
                     series[pmask] = 0.0
 
     return series
+
+
+# ── RE generation time-series synthesis ──────────────────────────────────────
+# Hourly normalized profiles (peak = 1.0).  The synthesis scales each month's
+# RE kWh onto these shapes so the integral matches the metered bill value.
+
+_RE_HOURLY_PROFILES: dict[str, np.ndarray] = {
+    # 台灣屋頂 / 地面型太陽能：日間 bell curve，夜間為零
+    "solar_pv": np.array([
+        0.00, 0.00, 0.00, 0.00, 0.00, 0.01,
+        0.05, 0.16, 0.35, 0.58, 0.80, 0.95,
+        1.00, 0.97, 0.88, 0.72, 0.48, 0.20,
+        0.05, 0.01, 0.00, 0.00, 0.00, 0.00,
+    ], dtype=float),
+    # 陸域風電：全天，清晨與深夜略高
+    "onshore_wind": np.array([
+        1.10, 1.14, 1.15, 1.12, 1.08, 1.04,
+        0.94, 0.88, 0.85, 0.87, 0.90, 0.93,
+        0.94, 0.94, 0.94, 0.94, 0.95, 0.96,
+        0.98, 1.00, 1.04, 1.07, 1.09, 1.11,
+    ], dtype=float),
+    # 離岸風電：台灣海峽東北季風，全天穩定，夜間略高
+    "offshore_wind": np.array([
+        1.06, 1.08, 1.10, 1.10, 1.08, 1.05,
+        1.01, 0.96, 0.92, 0.92, 0.93, 0.95,
+        0.96, 0.96, 0.96, 0.96, 0.97, 0.98,
+        0.99, 1.00, 1.02, 1.04, 1.05, 1.06,
+    ], dtype=float),
+    # 生質能：可調度，近似穩定基載
+    "biomass": np.ones(24, dtype=float),
+}
+
+
+def synthesize_re_timeseries(
+    rows: list,          # list of MonthlyRow (schema objects with .month, .total_re_kwh)
+    configs: list,       # list of ReSourceConfig (with .source_type)
+    proportions: dict,   # {source_type: fraction} summing to 1.0
+    index: pd.DatetimeIndex,
+) -> pd.Series:
+    """Synthesize a 15-min RE generation series from monthly bill RE data.
+
+    For each month, the total re_kwh is split across sources by *proportions*
+    (derived from capacity × CF), then each source's share is spread over
+    15-min intervals using the source-specific hourly generation profile.
+    The result preserves monthly energy totals exactly.
+    """
+    result = pd.Series(0.0, index=index)
+
+    for row in rows:
+        total_re = row.total_re_kwh
+        if total_re <= 0:
+            continue
+
+        month_mask = index.month == row.month
+        month_idx  = index[month_mask]
+        if len(month_idx) == 0:
+            continue
+
+        month_vals = np.zeros(len(month_idx))
+
+        for cfg in configs:
+            source_kwh = total_re * proportions.get(cfg.source_type, 0.0)
+            if source_kwh <= 0:
+                continue
+
+            profile_24h = _RE_HOURLY_PROFILES.get(cfg.source_type, np.ones(24))
+            # Normalize so profile sums to 1 (represents energy fraction)
+            profile_24h = profile_24h / profile_24h.sum()
+
+            # Expand each hour to 4 × 15-min intervals, then tile over all days
+            profile_15m = np.repeat(profile_24h, 4)
+            n_intervals  = len(month_idx)
+            tiled        = np.tile(profile_15m, n_intervals // 96 + 1)[:n_intervals]
+            tiled        = tiled / tiled.sum()   # re-normalize after tile
+
+            # kW so that Σ(kW × 0.25 h) = source_kwh
+            month_vals += (source_kwh / 0.25) * tiled
+
+        result[month_mask] = month_vals
+
+    return result

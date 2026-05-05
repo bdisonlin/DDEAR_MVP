@@ -1,5 +1,6 @@
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts'
 import type { LoadChartPoint } from '@/types'
+import { fmtNum } from '@/utils/formatters'
 
 interface Props { data: LoadChartPoint[] }
 
@@ -26,7 +27,7 @@ export default function LoadChart({ data }: Props) {
           axisLine={false} tickLine={false} />
         <Tooltip contentStyle={tooltipStyle}
           labelStyle={{ color: '#6b7280', fontSize: 11 }}
-          formatter={(v: number) => [`${v.toFixed(0)} kW`]} />
+          formatter={(v: number) => [`${fmtNum(v)} kW`]} />
         <Legend wrapperStyle={{ fontSize: 11, fontFamily: 'ui-monospace', color: '#8E8E93' }} />
         <Line type="monotone" dataKey="baseline_kw" name="基準負載"
           stroke="#007AFF" dot={false} strokeWidth={2} />

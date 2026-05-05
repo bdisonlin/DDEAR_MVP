@@ -6,6 +6,7 @@ import { runDemandResponse } from '@/api/demand_response'
 import AssetForm from '@/components/sandbox/AssetForm'
 import type { Asset, DRProgram, DRNotification } from '@/types'
 import clsx from 'clsx'
+import { fmtNum } from '@/utils/formatters'
 
 const ASSET_COLORS: Record<string, { bg: string; text: string; border: string }> = {
   solar_self:     { bg: 'rgba(255,149,0,0.09)',  text: '#FF9500', border: 'rgba(255,149,0,0.20)'  },
@@ -221,7 +222,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 基準資料已載入
               </div>
               <div className="font-data text-gray-400 dark:text-gray-500 truncate" style={{ fontSize: 10.5 }}>
-                {baseline.peak_kw.toFixed(0)} kW &middot; {(baseline.total_kwh / 1e6).toFixed(2)} GWh
+                {fmtNum(baseline.peak_kw)} kW &middot; {(baseline.total_kwh / 1e6).toFixed(2)} GWh
               </div>
             </div>
             <button
@@ -285,10 +286,10 @@ export default function Sidebar({ onClose }: SidebarProps) {
             )}
 
             {assets.length === 0 && !showAssetForm && (
-              <div className="py-8 text-center">
+              <div className="py-6 text-center">
                 <p className="mb-2" style={{ fontSize: 32 }}>🏭</p>
                 <p className="text-gray-400 dark:text-gray-600 leading-relaxed" style={{ fontSize: 12 }}>
-                  點擊「+ 新增」加入能源資產<br />開始數位孿生模擬
+                  基準用電曲線已呈現<br />點擊「+ 新增」加入能源資產<br />評估節能與投資效益
                 </p>
               </div>
             )}
@@ -330,13 +331,13 @@ export default function Sidebar({ onClose }: SidebarProps) {
               })}
             </div>
 
-            {assets.length > 0 && (
-              <div className="space-y-2 mt-1">
-                <button className="btn-primary w-full" onClick={handleSimulate} disabled={isSimulating}>
-                  {isSimulating
-                    ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />模擬中</>
-                    : '▶ 執行模擬'}
-                </button>
+            <div className="space-y-2 mt-1">
+              <button className="btn-primary w-full" onClick={handleSimulate} disabled={isSimulating}>
+                {isSimulating
+                  ? <><div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin-slow" />模擬中</>
+                  : '▶ 執行模擬'}
+              </button>
+              {assets.length > 0 && (
                 <button
                   className="btn-ghost w-full text-gray-400 dark:text-gray-500"
                   style={{ fontSize: 12 }}
@@ -344,8 +345,8 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 >
                   清空所有資產
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}

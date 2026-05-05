@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as d3 from 'd3'
 import { useThemeContext } from '@/context/ThemeContext'
+import { fmtNum } from '@/utils/formatters'
 
 // ── Types ─────────────────────────────────────────────────────
 interface EnergyParams {
@@ -510,7 +511,7 @@ function EnergyChart({ data, isDark, drStart, drEnd, drLabel, loadProfile }: Cha
             <div style="display:flex;flex-direction:column;gap:2.5px">
               <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:3px;padding-bottom:3px;border-bottom:1px solid ${tooltipDiv}">
                 <span style="color:${tooltipMuted}">實際負載</span>
-                <span style="font-family:monospace;font-weight:700;color:${tooltipText}">${actual.toFixed(0)} kW</span>
+                <span style="font-family:monospace;font-weight:700;color:${tooltipText}">${fmtNum(actual)} kW</span>
               </div>
               ${STACK_KEYS.map(k => {
                 const v = d[k as keyof HourlyData] as number; if (v < 1) return ''
@@ -519,12 +520,12 @@ function EnergyChart({ data, isDark, drStart, drEnd, drLabel, loadProfile }: Cha
                     <span style="width:7px;height:7px;border-radius:2px;background:${ENERGY_COLORS[k]};display:inline-block;flex-shrink:0"></span>
                     ${ENERGY_LABELS[k]}
                   </span>
-                  <span style="font-family:monospace;font-weight:600;color:${tooltipText};white-space:nowrap">${v.toFixed(0)} kW</span>
+                  <span style="font-family:monospace;font-weight:600;color:${tooltipText};white-space:nowrap">${fmtNum(v)} kW</span>
                 </div>`
               }).join('')}
               <div style="display:flex;justify-content:space-between;gap:12px;border-top:1px solid ${tooltipDiv};margin-top:2px;padding-top:3px">
                 <span style="color:${tooltipMuted}">新增供電</span>
-                <span style="font-family:monospace;font-weight:700;color:${tooltipText}">${(total - d.grid).toFixed(0)} kW</span>
+                <span style="font-family:monospace;font-weight:700;color:${tooltipText}">${fmtNum(total - d.grid)} kW</span>
               </div>
             </div>
           `)
@@ -686,7 +687,7 @@ export default function EnergyStrategy() {
       sub: kpis.capex < 1e6 ? '尚無新增資產' : kpis.capex < 5e7 ? '中等規模建置' : '大型系統投資',
       color: '#007AFF', glow: 'rgba(0,122,255,0.18)', icon: '🏗' },
     { label: `DR 年度收益 (${drPeriod.label})`,
-      value: kpis.drRevenue >= 1e6 ? `NT$ ${(kpis.drRevenue/1e6).toFixed(2)}M` : `NT$ ${(kpis.drRevenue/1e4).toFixed(0)} 萬`,
+      value: kpis.drRevenue >= 1e6 ? `NT$ ${(kpis.drRevenue/1e6).toFixed(2)}M` : `NT$ ${fmtNum(kpis.drRevenue/1e4)} 萬`,
       sub: kpis.drRevenue < 1e4 ? '無可調度資源' : `費率加成 ×${drPeriod.rateMultiplier.toFixed(2)}`,
       color: '#34C759', glow: 'rgba(52,199,89,0.18)', icon: '⚡' },
     { label: '24/7 CFE 達成率',
@@ -694,7 +695,7 @@ export default function EnergyStrategy() {
       sub: kpis.cfeRate >= 0.95 ? '✦ 近零碳供電' : kpis.cfeRate >= 0.55 ? '綠電比例良好' : '仍高度依賴電網',
       color: cfeColor, glow: `${cfeColor}30`, icon: '🌿' },
     { label: '年度碳排放量',
-      value: `${kpis.carbon.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,',')} tCO₂e`,
+      value: `${fmtNum(kpis.carbon)} tCO₂e`,
       sub: kpis.carbon < 1000 ? '接近淨零排放' : kpis.carbon < 5000 ? '持續低碳轉型' : '高碳基準情境',
       color: co2Color, glow: `${co2Color}30`, icon: '🏭' },
   ]
@@ -712,13 +713,13 @@ export default function EnergyStrategy() {
               {scenario.existingGenKw > 0 && (
                 <span className="ml-2 px-2 py-0.5 rounded-md font-semibold"
                   style={{ fontSize: 11.5, background: 'rgba(251,146,60,0.15)', color: '#fb923c' }}>
-                  現有機組 {scenario.existingGenKw} kW{scenario.genParalleled ? '（並聯）' : '（未並聯）'}
+                  現有機組 {fmtNum(scenario.existingGenKw)} kW{scenario.genParalleled ? '（並聯）' : '（未並聯）'}
                 </span>
               )}
               {scenario.existingSolarKw && (
                 <span className="ml-2 px-2 py-0.5 rounded-md font-semibold"
                   style={{ fontSize: 11.5, background: 'rgba(253,230,138,0.20)', color: '#d97706' }}>
-                  既有太陽能 {scenario.existingSolarKw} kW
+                  既有太陽能 {fmtNum(scenario.existingSolarKw)} kW
                 </span>
               )}
             </p>
@@ -933,13 +934,13 @@ export default function EnergyStrategy() {
                 {scenario.existingGenKw > 0 && (
                   <div className="px-2 py-0.5 rounded-md font-semibold"
                     style={{ fontSize: 12, background: 'rgba(251,146,60,0.12)', color: '#fb923c' }}>
-                    既有機組 {scenario.existingGenKw} kW
+                    既有機組 {fmtNum(scenario.existingGenKw)} kW
                   </div>
                 )}
                 {scenario.existingSolarKw && (
                   <div className="px-2 py-0.5 rounded-md font-semibold"
                     style={{ fontSize: 12, background: 'rgba(253,230,138,0.18)', color: '#d97706' }}>
-                    既有太陽能 {scenario.existingSolarKw} kW
+                    既有太陽能 {fmtNum(scenario.existingSolarKw)} kW
                   </div>
                 )}
               </div>

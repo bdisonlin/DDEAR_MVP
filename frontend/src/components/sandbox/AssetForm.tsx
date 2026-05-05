@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSandboxStore } from '@/store/useSandboxStore'
 import type { Asset, AssetParams } from '@/types'
+import { fmtNum } from '@/utils/formatters'
 
 interface Props { onAdd: (asset: Asset) => void; onCancel: () => void }
 
@@ -205,7 +206,7 @@ export default function AssetForm({ onAdd, onCancel }: Props) {
                     min={0} step={100000} />
                   {rniAnnualKwh !== '' && (
                     <p className="text-xs text-ios-gray2 mt-1">
-                      約 {((rniAnnualKwh as number) / 1000).toFixed(0)} MWh／年
+                      約 {fmtNum((rniAnnualKwh as number) / 1000)} MWh／年
                     </p>
                   )}
                 </div>
@@ -223,7 +224,7 @@ export default function AssetForm({ onAdd, onCancel }: Props) {
                   <p className="text-xs text-ios-gray2 mt-1">
                     預估年發電量：約{' '}
                     <span className="font-data text-ios-blue">
-                      {(cap * cf * 8760 / 1000).toFixed(0)} MWh／年
+                      {fmtNum(cap * cf * 8760 / 1000)} MWh／年
                     </span>
                     {' '}（CF {(cf * 100).toFixed(0)}%）
                   </p>

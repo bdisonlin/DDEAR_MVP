@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import type { HeatmapCell } from '@/types'
+import { fmtNum } from '@/utils/formatters'
 
 interface Props { data: HeatmapCell[] }
 
@@ -87,7 +88,7 @@ export default function HeatmapChart({ data }: Props) {
 
   const legendStops = [0, 0.25, 0.5, 0.75, 1.0].map(t => ({
     color: kwToColor(minVal + t * (maxVal - minVal), minVal, maxVal),
-    label: `${(minVal + t * (maxVal - minVal)).toFixed(0)} kW`,
+    label: `${fmtNum(minVal + t * (maxVal - minVal))} kW`,
   }))
 
   const VIEW_TABS: { key: ViewMode; label: string }[] = [
@@ -114,7 +115,7 @@ export default function HeatmapChart({ data }: Props) {
         </div>
         {mode !== 'tou' && (
           <span className="text-xs text-ios-gray2 font-data ml-auto">
-            {minVal.toFixed(0)} – {maxVal.toFixed(0)} kW
+            {fmtNum(minVal)} – {fmtNum(maxVal)} kW
           </span>
         )}
         {mode === 'tou' && (
@@ -242,7 +243,7 @@ export default function HeatmapChart({ data }: Props) {
           <div className="font-semibold text-ios-blue">
             {MONTHS[tooltip.month - 1]} · {String(tooltip.hour).padStart(2,'0')}:00
           </div>
-          <div className="text-gray-600 font-data">{tooltip.value.toFixed(1)} kW 平均</div>
+          <div className="text-gray-600 font-data">{fmtNum(tooltip.value, 1)} kW 平均</div>
           {mode === 'tou' && (() => {
             const zone = getTouZone(tooltip.month, tooltip.hour)
             return (

@@ -1,13 +1,18 @@
 import { create } from 'zustand'
 import type {
-  Asset, BaselineSummary, SimulationResponse,
+  Asset, BaselineSummary, MonthlyBillSummary, SimulationResponse,
   TariffConfig, FinancialConfig, AssetTypeInfo, Insight,
-  DRConfig, DRSettlement,
+  DRConfig, DRSettlement, ReSourceConfig,
 } from '@/types'
 
+export type AnyBaseline = BaselineSummary | MonthlyBillSummary
+
 interface SandboxState {
-  baseline: BaselineSummary | null
-  setBaseline: (b: BaselineSummary | null) => void
+  baseline: AnyBaseline | null
+  setBaseline: (b: AnyBaseline | null) => void
+
+  reSourceConfigs: ReSourceConfig[] | null
+  setReSourceConfigs: (c: ReSourceConfig[] | null) => void
 
   assetTypes: AssetTypeInfo[]
   setAssetTypes: (types: AssetTypeInfo[]) => void
@@ -65,7 +70,10 @@ const defaultDrConfig: DRConfig = {
 
 export const useSandboxStore = create<SandboxState>((set) => ({
   baseline: null,
-  setBaseline: (b) => set({ baseline: b, assets: [], simResult: null, insights: [], drResult: null }),
+  setBaseline: (b) => set({ baseline: b, assets: [], simResult: null, insights: [], drResult: null, reSourceConfigs: null }),
+
+  reSourceConfigs: null,
+  setReSourceConfigs: (c) => set({ reSourceConfigs: c }),
 
   assetTypes: [],
   setAssetTypes: (types) => set({ assetTypes: types }),

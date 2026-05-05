@@ -1,8 +1,8 @@
 import { useTilt } from '@/hooks/useTilt'
 import type { KpiResult, RoiResult } from '@/types'
-import { fmtNtd, fmtPct, fmtKwh } from '@/utils/formatters'
+import { fmtNtd, fmtPct, fmtKwh, fmtNum } from '@/utils/formatters'
 
-interface Props { kpis: KpiResult; roi: RoiResult }
+interface Props { kpis: KpiResult; roi: RoiResult; baselineReKwh?: number; annualPpaCostNtd?: number }
 
 interface CardProps {
   title: string
@@ -67,10 +67,85 @@ function KpiCard({ title, value, sub, accent, bg, border, icon, positive }: Card
   )
 }
 
-export default function KpiCards({ kpis, roi }: Props) {
+export default function KpiCards({ kpis, roi, baselineReKwh = 0, annualPpaCostNtd = 0 }: Props) {
   const hasPenalty = kpis.demand_penalty_annual_ntd > 0
   const hasExcess  = kpis.res_tou_excess_annual_ntd  > 0
   const hasSpread  = kpis.storage_price_spread_ntd_per_kwh > 0
+
+  // Baseline-only mode: no assets configured, show absolute baseline metrics instead of deltas
+  const isBaselineOnly = kpis.total_capex === 0 && kpis.re_kwh === 0 && kpis.annual_savings === 0
+  // Total consumption including existing RE from the bill (台電購電 + 綠電轉供)
+  const totalKwh = kpis.baseline_load_kwh + baselineReKwh
+  const totalAnnualCost = kpis.baseline_annual_cost + annualPpaCostNtd
+  const hasPpa = annualPpaCostNtd > 0 && baselineReKwh > 0
+  const avgRateNtdPerKwh = totalKwh > 0 ? totalAnnualCost / totalKwh : 0
+  const existingReRatio = totalKwh > 0 ? baselineReKwh / totalKwh : 0
+
+  if (isBaselineOnly) {
+    return (
+      <div className="space-y-2.5 animate-fade-up">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          <KpiCard
+            title={hasPpa ? '總電力成本' : '台電購電費'}
+            value={fmtNtd(hasPpa ? totalAnnualCost : kpis.baseline_annual_cost)}
+            sub={hasPpa
+              ? `台電 ${fmtNtd(kpis.baseline_annual_cost)} + PPA ${fmtNtd(annualPpaCostNtd)}`
+              : '不含綠電 PPA 合約費'}
+            accent="#34C759"
+            bg="rgba(52,199,89,0.07)"
+            border="rgba(52,199,89,0.16)"
+            icon="💰"
+          />
+          <KpiCard
+            title="年用電量"
+            value={`${(totalKwh / 1e6).toFixed(2)} GWh`}
+            sub={baselineReKwh > 0 ? `台電 ${(kpis.baseline_load_kwh/1e6).toFixed(2)} + 綠電 ${(baselineReKwh/1e6).toFixed(2)}` : '全年用電'}
+            accent="#007AFF"
+            bg="rgba(0,122,255,0.06)"
+            border="rgba(0,122,255,0.14)"
+            icon="⚡"
+          />
+          <KpiCard
+            title={baselineReKwh > 0 ? '現有再生能源' : '年碳排放'}
+            value={baselineReKwh > 0 ? fmtPct(existingReRatio) : `${fmtNum(kpis.baseline_carbon_tons, 0)} t`}
+            sub={baselineReKwh > 0 ? `${fmtKwh(baselineReKwh)} 綠電轉供` : 'CO₂e 年排放'}
+            accent={baselineReKwh > 0 ? '#34C759' : '#AF52DE'}
+            bg={baselineReKwh > 0 ? 'rgba(52,199,89,0.07)' : 'rgba(175,82,222,0.07)'}
+            border={baselineReKwh > 0 ? 'rgba(52,199,89,0.16)' : 'rgba(175,82,222,0.16)'}
+            icon={baselineReKwh > 0 ? '♻️' : '🌿'}
+            positive={baselineReKwh > 0}
+          />
+          <KpiCard
+            title="平均電費單價"
+            value={`${avgRateNtdPerKwh.toFixed(2)} 元`}
+            sub="NT$ / kWh"
+            accent="#FF9500"
+            bg="rgba(255,149,0,0.07)"
+            border="rgba(255,149,0,0.16)"
+            icon="📊"
+          />
+          <KpiCard
+            title="需量狀況"
+            value={hasPenalty ? fmtNtd(kpis.demand_penalty_annual_ntd) : '正常'}
+            sub={hasPenalty ? '超約罰款 / 年' : '無超約罰款'}
+            accent={hasPenalty ? '#FF3B30' : '#5856D6'}
+            bg={hasPenalty ? 'rgba(255,59,48,0.07)' : 'rgba(88,86,214,0.07)'}
+            border={hasPenalty ? 'rgba(255,59,48,0.16)' : 'rgba(88,86,214,0.16)'}
+            icon={hasPenalty ? '⚠️' : '✅'}
+            positive={!hasPenalty}
+          />
+        </div>
+        {hasPenalty && (
+          <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-ios-sm font-medium"
+              style={{ fontSize: 12, background: 'rgba(255,59,48,0.08)', border: '1px solid rgba(255,59,48,0.18)', color: '#FF3B30' }}>
+              ⚠ 超約罰款 {fmtNtd(kpis.demand_penalty_annual_ntd)} / 年
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-2.5 animate-fade-up">
@@ -97,7 +172,7 @@ export default function KpiCards({ kpis, roi }: Props) {
         />
         <KpiCard
           title="年減碳量"
-          value={`${kpis.carbon_reduction_tons.toFixed(1)} t`}
+          value={`${fmtNum(kpis.carbon_reduction_tons, 1)} t`}
           sub={`CO₂e ↓ ${fmtPct(kpis.carbon_reduction_pct)}`}
           accent="#AF52DE"
           bg="rgba(175,82,222,0.07)"

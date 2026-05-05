@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSandboxStore } from '@/store/useSandboxStore'
 import KpiCards from '@/components/dashboard/KpiCards'
 import LoadChart from '@/components/charts/LoadChart'
@@ -7,10 +7,27 @@ import RoiChart from '@/components/charts/RoiChart'
 import HeatmapChart from '@/components/charts/HeatmapChart'
 import DrChart from '@/components/charts/DrChart'
 import MonthlyBillForm from '@/components/sidebar/MonthlyBillForm'
-import { fmtNtd, fmtPct } from '@/utils/formatters'
-import type { Insight, DRSettlement, MonthlyBillSummary } from '@/types'
+import { fmtNtd, fmtPct, fmtNum } from '@/utils/formatters'
+import type { Insight, DRSettlement, MonthlyBillSummary, ReSourceConfig } from '@/types'
 import { generateSample, uploadBaseline, runSimulation, fetchInsights, DEMO_ASSETS } from '@/api/simulation'
 import clsx from 'clsx'
+
+const RE_SOURCE_META: Record<string, { icon: string; label: string; cf: number }> = {
+  solar_pv:      { icon: '☀️', label: '太陽光電', cf: 0.15 },
+  onshore_wind:  { icon: '🌀', label: '陸域風電',  cf: 0.27 },
+  offshore_wind: { icon: '🌊', label: '離岸風電',  cf: 0.38 },
+  biomass:       { icon: '🌿', label: '生質能',    cf: 0.75 },
+}
+
+function computeReProportions(configs: ReSourceConfig[]): { source_type: string; pct: number }[] {
+  const expected = configs.map(c => ({
+    source_type: c.source_type,
+    exp: c.capacity_kw * (RE_SOURCE_META[c.source_type]?.cf ?? 0.15),
+  }))
+  const total = expected.reduce((s, e) => s + e.exp, 0)
+  if (total === 0) return configs.map(c => ({ source_type: c.source_type, pct: 100 / configs.length }))
+  return expected.map(e => ({ source_type: e.source_type, pct: (e.exp / total) * 100 }))
+}
 
 const TABS = [
   { label: '總覽',    icon: '▦', color: '#007AFF' },
@@ -192,7 +209,7 @@ function DrTab({ drResult, isDrSimulating, drError }: {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: '年度需量反應收益', value: fmtNtd(drResult.annual_net_revenue), color: '#5856D6', bg: 'rgba(88,86,214,0.07)', border: 'rgba(88,86,214,0.16)', icon: '🔌' },
-          { label: '平均 CBL 基準', value: `${drResult.cbl_kw.toFixed(0)} kW`, color: '#007AFF', bg: 'rgba(0,122,255,0.06)', border: 'rgba(0,122,255,0.14)', icon: '📊' },
+          { label: '平均 CBL 基準', value: `${fmtNum(drResult.cbl_kw)} kW`, color: '#007AFF', bg: 'rgba(0,122,255,0.06)', border: 'rgba(0,122,255,0.14)', icon: '📊' },
           { label: '平均執行率', value: fmtPct(drResult.avg_execution_rate), color: drResult.avg_execution_rate >= 0.8 ? '#34C759' : '#FF9500', bg: 'rgba(52,199,89,0.06)', border: 'rgba(52,199,89,0.14)', icon: '✓' },
           { label: '全年執行時數', value: `${drResult.total_event_hours} hr`, color: '#FF9500', bg: 'rgba(255,149,0,0.07)', border: 'rgba(255,149,0,0.16)', icon: '⏱' },
         ].map((item) => (
@@ -232,8 +249,8 @@ function DrTab({ drResult, isDrSimulating, drError }: {
         <div className="card space-y-3">
           <p className="section-title">年度結算明細</p>
           {[
-            { k: '約定抑低容量', v: `${drResult.contracted_kw.toFixed(0)} kW`, color: '#007AFF' },
-            { k: '實際平均抑低', v: `${drResult.avg_actual_reduction_kw.toFixed(0)} kW`, color: '#34C759' },
+            { k: '約定抑低容量', v: `${fmtNum(drResult.contracted_kw)} kW`, color: '#007AFF' },
+            { k: '實際平均抑低', v: `${fmtNum(drResult.avg_actual_reduction_kw)} kW`, color: '#34C759' },
             { k: '年執行次數',   v: `${drResult.total_events_per_year} 次`, color: '#FF9500' },
             { k: '流動電費',     v: fmtNtd(drResult.annual_flow_revenue), color: '#007AFF' },
             { k: '基本費扣減',   v: fmtNtd(drResult.annual_basic_fee_discount), color: '#34C759' },
@@ -276,8 +293,8 @@ function DrTab({ drResult, isDrSimulating, drError }: {
             {drResult.monthly.map((m) => (
               <tr key={m.month}>
                 <td className="text-ios-gray1 font-data">{m.month}</td>
-                <td className="font-data">{m.cbl_kw.toFixed(0)}</td>
-                <td className="font-data text-ios-blue">{m.actual_reduction_kw.toFixed(0)}</td>
+                <td className="font-data">{fmtNum(m.cbl_kw)}</td>
+                <td className="font-data text-ios-blue">{fmtNum(m.actual_reduction_kw)}</td>
                 <td className={`font-data font-bold ${m.execution_rate >= 0.8 ? 'text-ios-green' : m.execution_rate >= 0.6 ? 'text-ios-orange' : 'text-ios-red'}`}>
                   {fmtPct(m.execution_rate)}
                 </td>
@@ -306,6 +323,7 @@ function EmptyState() {
     setBaseline, clearAssets, addAsset,
     setSimResult, setIsSimulating, setSimError, isSimulating,
     setInsights, setIsLoadingInsights, tariff, financial,
+    setReSourceConfigs,
   } = useSandboxStore()
   const [inputMode, setInputMode] = useState<InputMode>('sample')
   const [peakKw, setPeakKw]       = useState(1000)
@@ -339,15 +357,38 @@ function EmptyState() {
     const file = e.target.files?.[0]
     if (!file) return
     setLoading(true)
+    setSimError(null)
     try {
       const b = await uploadBaseline(file)
+      setIsSimulating(true)
       setBaseline(b)
+      const result = await runSimulation(b.data_id, [], tariff, financial)
+      setSimResult(result)
+      setIsLoadingInsights(true)
+      fetchInsights(result, [])
+        .then(setInsights).catch(() => setInsights([]))
+        .finally(() => setIsLoadingInsights(false))
     } catch (err: unknown) { alert((err as Error).message) }
-    finally { setLoading(false) }
+    finally { setLoading(false); setIsSimulating(false) }
   }
 
-  const handleBillSuccess = (result: MonthlyBillSummary) => {
+  const handleBillSuccess = async (result: MonthlyBillSummary, configs?: ReSourceConfig[]) => {
+    setSimError(null)
+    setIsSimulating(true)
     setBaseline(result)
+    setReSourceConfigs(configs ?? null)
+    try {
+      const simResult = await runSimulation(result.data_id, [], tariff, financial)
+      setSimResult(simResult)
+      setIsLoadingInsights(true)
+      fetchInsights(simResult, [])
+        .then(setInsights).catch(() => setInsights([]))
+        .finally(() => setIsLoadingInsights(false))
+    } catch (e: unknown) {
+      setSimError((e as Error).message)
+    } finally {
+      setIsSimulating(false)
+    }
   }
 
   const busy = loading || isSimulating
@@ -526,18 +567,44 @@ function EmptyState() {
 }
 
 export default function Dashboard() {
-  const { simResult, isSimulating, simError, baseline, drResult, isDrSimulating, drError } = useSandboxStore()
+  const {
+    simResult, isSimulating, simError, baseline, drResult, isDrSimulating, drError,
+    setSimResult, setIsSimulating, setSimError, setInsights, setIsLoadingInsights,
+    tariff, financial, reSourceConfigs,
+  } = useSandboxStore()
   const [activeTab, setActiveTab] = useState(0)
   const [selectedMonth, setSelectedMonth] = useState(7)
   const [selectedWeek, setSelectedWeek] = useState(2)
 
+  // Auto-simulate baseline-only load curve whenever baseline is present but no result exists
+  useEffect(() => {
+    if (!baseline || simResult || isSimulating) return
+    setIsSimulating(true)
+    setSimError(null)
+    runSimulation(baseline.data_id, [], tariff, financial)
+      .then(result => {
+        setSimResult(result)
+        setIsLoadingInsights(true)
+        fetchInsights(result, [])
+          .then(setInsights).catch(() => setInsights([]))
+          .finally(() => setIsLoadingInsights(false))
+      })
+      .catch(e => setSimError((e as Error).message))
+      .finally(() => setIsSimulating(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseline])
+
   if (!baseline) return <EmptyState />
+
+  // re_kwh and annual_ppa_cost_ntd are present on MonthlyBillSummary (from monthly bill upload)
+  const baselineReKwh = (baseline as MonthlyBillSummary).re_kwh ?? 0
+  const annualPpaCostNtd = (baseline as MonthlyBillSummary).annual_ppa_cost_ntd ?? 0
 
   return (
     <div className="space-y-4 animate-fade-up">
 
       {/* KPI strip */}
-      {simResult && <KpiCards kpis={simResult.kpis} roi={simResult.roi} />}
+      {simResult && <KpiCards kpis={simResult.kpis} roi={simResult.roi} baselineReKwh={baselineReKwh} annualPpaCostNtd={annualPpaCostNtd} />}
 
       {/* Tab bar */}
       <div className="flex flex-wrap gap-1 p-1 rounded-[12px] bg-black/[0.055] dark:bg-white/[0.06] w-full md:w-fit">
@@ -576,7 +643,7 @@ export default function Dashboard() {
           </div>
           <p className="font-semibold text-gray-700 dark:text-gray-300" style={{ fontSize: 15 }}>尚無模擬結果</p>
           <p className="text-gray-400 dark:text-gray-500" style={{ fontSize: 13 }}>
-            從左側「+ 新增」加入能源資產，系統將自動執行模擬
+            點擊左側「▶ 執行模擬」，或新增能源資產後自動觸發模擬
           </p>
         </div>
       )}
@@ -599,42 +666,71 @@ export default function Dashboard() {
                   <div>
                     <p className="section-title">能源結構</p>
                     <div className="space-y-3.5">
-                      {[
-                        { label: '台電購電', value: simResult.kpis.net_load_kwh, color: '#007AFF' },
-                        { label: '再生能源', value: simResult.kpis.re_kwh, color: '#34C759' },
-                      ].map((item) => {
-                        const pct = item.value / simResult.kpis.baseline_load_kwh
-                        return (
-                          <div key={item.label}>
-                            <div className="flex justify-between mb-1.5" style={{ fontSize: 12.5 }}>
-                              <span className="font-semibold" style={{ color: item.color }}>{item.label}</span>
-                              <span className="text-gray-400 dark:text-gray-500 font-data">
-                                {fmtPct(pct)} · {(item.value / 1e6).toFixed(2)} GWh
-                              </span>
+                      {(() => {
+                        // Use simulation RE if assets are configured, otherwise fall back to bill's existing RE
+                        const simReKwh = simResult.kpis.re_kwh
+                        const displayReKwh = simReKwh > 0 ? simReKwh : baselineReKwh
+                        const totalKwh = simResult.kpis.net_load_kwh + displayReKwh
+                        const items = [
+                          { label: '台電購電', value: simResult.kpis.net_load_kwh, color: '#007AFF' },
+                          { label: displayReKwh > 0 && simReKwh === 0 ? '再生能源（現有）' : '再生能源', value: displayReKwh, color: '#34C759' },
+                        ]
+                        return items.map((item) => {
+                          const pct = totalKwh > 0 ? item.value / totalKwh : 0
+                          const isRe = item.color === '#34C759'
+                          const showSrcBreakdown = isRe && displayReKwh > 0 && reSourceConfigs && reSourceConfigs.length > 0
+                          return (
+                            <div key={item.label}>
+                              <div className="flex justify-between mb-1.5" style={{ fontSize: 12.5 }}>
+                                <span className="font-semibold" style={{ color: item.color }}>{item.label}</span>
+                                <span className="text-gray-400 dark:text-gray-500 font-data">
+                                  {fmtPct(pct)} · {(item.value / 1e6).toFixed(2)} GWh
+                                </span>
+                              </div>
+                              <div className="progress-track">
+                                <div className="progress-fill" style={{ width: `${pct * 100}%`, background: item.color }} />
+                              </div>
+                              {showSrcBreakdown && (
+                                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 pl-0.5" style={{ fontSize: 10.5 }}>
+                                  {computeReProportions(reSourceConfigs).map(({ source_type, pct: srcPct }) => {
+                                    const meta = RE_SOURCE_META[source_type]
+                                    return (
+                                      <span key={source_type} className="text-ios-gray2">
+                                        {meta?.icon} {meta?.label}
+                                        {reSourceConfigs.length > 1 && <span className="font-data text-ios-green/70 ml-1">≈ {srcPct.toFixed(0)}%</span>}
+                                      </span>
+                                    )
+                                  })}
+                                </div>
+                              )}
                             </div>
-                            <div className="progress-track">
-                              <div className="progress-fill" style={{ width: `${pct * 100}%`, background: item.color }} />
-                            </div>
-                          </div>
-                        )
-                      })}
+                          )
+                        })
+                      })()}
                     </div>
                   </div>
 
                   <div className="flex-1">
                     <p className="section-title">年度成本明細</p>
                     <div className="space-y-2" style={{ fontSize: 12.5 }}>
-                      {[
-                        { k: '基準年費',   v: fmtNtd(simResult.kpis.baseline_annual_cost), color: 'text-gray-700 dark:text-gray-300' },
-                        { k: '模擬後電費', v: fmtNtd(simResult.kpis.scenario_annual_cost), color: 'text-ios-green' },
-                        { k: 'O&M 成本',   v: `- ${fmtNtd(simResult.kpis.total_annual_om)}`, color: 'text-gray-400' },
-                        ...(simResult.kpis.annual_fuel_cost_ntd > 0 ? [{ k: '燃料成本', v: `- ${fmtNtd(simResult.kpis.annual_fuel_cost_ntd)}`, color: 'text-ios-red' }] : []),
-                      ].map(({ k, v, color }) => (
-                        <div key={k} className="flex justify-between items-center">
-                          <span className="text-gray-500 dark:text-gray-400">{k}</span>
-                          <span className={`font-data font-semibold ${color}`}>{v}</span>
-                        </div>
-                      ))}
+                      {(() => {
+                        const hasPpa = annualPpaCostNtd > 0
+                        const baseLabel = hasPpa ? '台電購電費' : '基準年費'
+                        const baseValue = fmtNtd(simResult.kpis.baseline_annual_cost)
+                        const rows = [
+                          { k: baseLabel, v: baseValue, color: 'text-gray-700 dark:text-gray-300' },
+                          ...(hasPpa ? [{ k: '綠電 PPA 費', v: fmtNtd(annualPpaCostNtd), color: 'text-ios-green' }] : []),
+                          { k: '模擬後電費', v: fmtNtd(simResult.kpis.scenario_annual_cost), color: 'text-ios-blue' },
+                          { k: 'O&M 成本',   v: `- ${fmtNtd(simResult.kpis.total_annual_om)}`, color: 'text-gray-400' },
+                          ...(simResult.kpis.annual_fuel_cost_ntd > 0 ? [{ k: '燃料成本', v: `- ${fmtNtd(simResult.kpis.annual_fuel_cost_ntd)}`, color: 'text-ios-red' }] : []),
+                        ]
+                        return rows.map(({ k, v, color }) => (
+                          <div key={k} className="flex justify-between items-center">
+                            <span className="text-gray-500 dark:text-gray-400">{k}</span>
+                            <span className={`font-data font-semibold ${color}`}>{v}</span>
+                          </div>
+                        ))
+                      })()}
                       <div className="border-t border-black/6 dark:border-white/8 pt-2 flex justify-between items-center">
                         <span className="font-semibold text-gray-600 dark:text-gray-300" style={{ fontSize: 13 }}>年節省</span>
                         <span className={`font-data font-bold ${simResult.kpis.annual_savings > 0 ? 'text-ios-green' : 'text-ios-red'}`}
@@ -744,7 +840,7 @@ export default function Dashboard() {
                         </td>
                         <td className="font-data text-ios-gray1">{fmtPct(m.savings_pct)}</td>
                         <td className="font-data text-ios-blue">{fmtPct(m.re_ratio)}</td>
-                        <td className="font-data text-ios-gray1">{m.peak_kwh.toFixed(0)}</td>
+                        <td className="font-data text-ios-gray1">{fmtNum(m.peak_kwh)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -766,7 +862,7 @@ export default function Dashboard() {
                     <div className="flex justify-between mb-1.5" style={{ fontSize: 12.5 }}>
                       <span className="text-gray-500 dark:text-gray-400">{item.label}</span>
                       <span className="font-bold font-data" style={{ color: item.color }}>
-                        {item.value.toFixed(1)} tCO₂e
+                        {fmtNum(item.value, 1)} tCO₂e
                       </span>
                     </div>
                     <div className="progress-track h-2">
@@ -780,7 +876,7 @@ export default function Dashboard() {
                 <div className="rounded-ios-sm p-4 text-center"
                   style={{ background: 'rgba(52,199,89,0.07)', border: '1px solid rgba(52,199,89,0.18)' }}>
                   <p className="font-bold font-data text-ios-green" style={{ fontSize: 32 }}>
-                    {simResult.kpis.carbon_reduction_tons.toFixed(1)}
+                    {fmtNum(simResult.kpis.carbon_reduction_tons, 1)}
                   </p>
                   <p className="text-gray-500 dark:text-gray-400 mt-1" style={{ fontSize: 12.5 }}>
                     tCO₂e 年減碳量 ({fmtPct(simResult.kpis.carbon_reduction_pct)})
@@ -791,10 +887,10 @@ export default function Dashboard() {
               <div className="card space-y-2.5">
                 <p className="section-title">減碳相當於</p>
                 {[
-                  { icon: '🚗', label: '少開汽車',     value: `${(simResult.kpis.carbon_reduction_tons * 4500).toFixed(0)} km`,   color: '#007AFF' },
-                  { icon: '🌳', label: '種植樹木',     value: `${(simResult.kpis.carbon_reduction_tons * 55).toFixed(0)} 棵/年`,   color: '#34C759' },
-                  { icon: '✈️', label: '台北→東京飛行', value: `${(simResult.kpis.carbon_reduction_tons * 0.9).toFixed(1)} 趟`,    color: '#FF9500' },
-                  { icon: '🏠', label: '家庭用電',     value: `${(simResult.kpis.carbon_reduction_tons * 1000 / 0.494 / 3600).toFixed(0)} 戶/年`, color: '#AF52DE' },
+                  { icon: '🚗', label: '少開汽車',     value: `${fmtNum(simResult.kpis.carbon_reduction_tons * 4500)} km`,   color: '#007AFF' },
+                  { icon: '🌳', label: '種植樹木',     value: `${fmtNum(simResult.kpis.carbon_reduction_tons * 55)} 棵/年`,   color: '#34C759' },
+                  { icon: '✈️', label: '台北→東京飛行', value: `${fmtNum(simResult.kpis.carbon_reduction_tons * 0.9, 1)} 趟`,    color: '#FF9500' },
+                  { icon: '🏠', label: '家庭用電',     value: `${fmtNum(simResult.kpis.carbon_reduction_tons * 1000 / 0.494 / 3600)} 戶/年`, color: '#AF52DE' },
                 ].map((item) => (
                   <div key={item.label}
                     className="flex items-center gap-3 rounded-ios-sm px-3.5 py-3 transition-colors"

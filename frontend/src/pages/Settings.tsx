@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { getSettings, updateSettings } from '@/api/settings'
+import { useSandboxStore } from '@/store/useSandboxStore'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -222,6 +223,8 @@ function TierTable({
 // ── Main Page ──────────────────────────────────────────────────────────────────
 
 export default function Settings() {
+  const { financial, setFinancial } = useSandboxStore()
+
   const [draft, setDraft]     = useState<TariffDraft | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -303,6 +306,31 @@ export default function Settings() {
           ✓ 費率已更新，下次執行模擬將自動套用新費率
         </div>
       )}
+
+      {/* ── 0. Financial ── */}
+      <SectionCard title="財務參數" icon="💰">
+        <div className="grid grid-cols-2 gap-x-8 gap-y-5">
+          <FieldLabel label="折現率 (WACC)" unit="%">
+            <NumInput
+              value={financial.discount_rate * 100}
+              onChange={v => setFinancial({ ...financial, discount_rate: v / 100 })}
+              step="0.5"
+              width="w-24"
+            />
+          </FieldLabel>
+          <FieldLabel label="財務分析年限" unit="年">
+            <NumInput
+              value={financial.project_years}
+              onChange={v => setFinancial({ ...financial, project_years: Math.round(v) })}
+              step="1"
+              width="w-24"
+            />
+          </FieldLabel>
+        </div>
+        <p className="text-xs text-ios-gray2 mt-4">
+          ※ 折現率與年限用於 NPV / IRR 試算；綠電 PPA 費率請在電費單上傳時各別設定
+        </p>
+      </SectionCard>
 
       {/* ── 1. TOU Rates ── */}
       <SectionCard title="時間電價費率" icon="⚡">

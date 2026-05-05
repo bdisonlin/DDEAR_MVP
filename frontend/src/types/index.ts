@@ -167,6 +167,19 @@ export interface BillRow {
   re_offpeak_kwh: string
 }
 
+export interface ReSourceConfig {
+  source_type: ReSourceType
+  capacity_kw: number                    // PPA contracted capacity; proportion derived by backend via CF
+  ppa_rate_ntd_per_kwh: number | null
+}
+
+// UI draft (string inputs for controlled form fields)
+export interface ReSourceConfigDraft {
+  source_type: ReSourceType
+  capacity_kw: string          // "500" kW
+  ppa_rate: string             // "3.50" NT$/kWh, empty = not set
+}
+
 export interface MonthlyBillRequestRow {
   month: number
   kwh?: number
@@ -182,17 +195,32 @@ export interface MonthlyBillRequestRow {
   re_offpeak_kwh?: number
 }
 
+export type ReSourceType = 'solar_pv' | 'onshore_wind' | 'offshore_wind' | 'biomass'
+
+export type IndustryType =
+  | 'office_commercial'
+  | 'heavy_industry'
+  | 'semiconductor'
+  | 'cold_chain'
+  | 'retail'
+
 export interface MonthlyBillRequest {
   year: number
   bill_type: BillType
   voltage: VoltageLevel
   contracted_kw?: number | null
+  re_source_type?: ReSourceType          // legacy single-source
+  re_source_configs?: ReSourceConfig[]  // multi-source: capacity_kw + PPA; proportions derived by backend
+  industry_type: IndustryType
+  use_industry_shape: boolean
   rows: MonthlyBillRequestRow[]
 }
 
 export interface MonthlyBillSummary extends BaselineSummary {
   re_kwh: number
   suggested_re_capacity_kw: number
+  re_period_breakdown?: Record<string, number>
+  annual_ppa_cost_ntd?: number
 }
 
 // ── Demand Response ────────────────────────────────────────────────────────────
